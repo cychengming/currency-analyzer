@@ -31,7 +31,9 @@ app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # 7 days
 # ========== CONFIGURATION ==========
 GMAIL_USER = os.environ.get('GMAIL_USER', 'your.email@gmail.com')
 GMAIL_APP_PASSWORD = os.environ.get('GMAIL_PASSWORD', 'xxxx xxxx xxxx xxxx')
-DATABASE = 'currency_monitor.db'
+DATA_DIR = '/app/data'
+os.makedirs(DATA_DIR, exist_ok=True)
+DATABASE = os.path.join(DATA_DIR, 'currency_monitor.db')
 
 # Currency pairs to monitor
 CURRENCY_PAIRS = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'AUD/USD', 'USD/CAD', 'NZD/USD']
@@ -559,6 +561,9 @@ def api_live_rates():
 @login_required
 def api_historical(pair, days):
     """Get historical data for a pair"""
+    # Handle URL encoded pair like "EUR/USD" or "EUR%2FUSD"
+    from urllib.parse import unquote
+    pair = unquote(pair)
     data = fetch_historical_data(pair, days)
     return jsonify(data)
 

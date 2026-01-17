@@ -32,6 +32,12 @@ async function initDashboard() {
     const authenticated = await checkAuth();
     if (!authenticated) return;
     
+    // Show dashboard
+    const dashboard = document.getElementById('dashboard');
+    if (dashboard) {
+        dashboard.classList.add('show');
+    }
+    
     loadPages();
     await loadSettings();
     await loadAlertPreferences();
@@ -184,7 +190,8 @@ async function selectPair(pair) {
 }
 
 async function fetchHistoricalData() {
-    const data = await fetchAPI(`/api/historical/${selectedPair}/${currentTimeframe}`);
+    const encodedPair = encodeURIComponent(selectedPair);
+    const data = await fetchAPI(`/api/historical/${encodedPair}/${currentTimeframe}`);
     if (data) {
         updateChart(data);
     }
