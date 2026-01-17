@@ -26,7 +26,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS settings
                  (key TEXT PRIMARY KEY, value TEXT)''')
     
-    # Alert history table
+    # Alert history table (enhanced with alert type and trigger values)
     c.execute('''CREATE TABLE IF NOT EXISTS alerts
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   pair TEXT,
@@ -34,18 +34,36 @@ def init_db():
                   old_rate REAL,
                   new_rate REAL,
                   timestamp TEXT,
-                  email_sent INTEGER)''')
+                  email_sent INTEGER,
+                  alert_type TEXT,
+                  trigger_value REAL,
+                  threshold_value REAL)''')
     
     # Monitoring state table
     c.execute('''CREATE TABLE IF NOT EXISTS monitoring_state
                  (pair TEXT PRIMARY KEY, last_alert_time REAL)''')
     
-    # Alert preferences table (per-pair settings)
+    # Alert preferences table (enhanced with multiple condition types)
     c.execute('''CREATE TABLE IF NOT EXISTS alert_preferences
                  (pair TEXT PRIMARY KEY,
                   enabled INTEGER,
+                  alert_type TEXT DEFAULT 'percentage_change',
+                  
                   custom_threshold REAL,
-                  custom_period INTEGER)''')
+                  custom_period INTEGER,
+                  enable_trend_consistency INTEGER DEFAULT 1,
+                  
+                  lookback_years INTEGER DEFAULT 5,
+                  
+                  price_high REAL,
+                  price_low REAL,
+                  trigger_type TEXT,
+                  
+                  volatility_type TEXT,
+                  
+                  ma_short_period INTEGER DEFAULT 10,
+                  ma_long_period INTEGER DEFAULT 50,
+                  signal_type TEXT)''')
     
     # Users table
     c.execute('''CREATE TABLE IF NOT EXISTS users
@@ -88,18 +106,17 @@ def set_setting(key, value):
     conn.commit()
     conn.close()
 
-def save_alert(pair, percent_change, old_rate, new_rate, email_sent):
-    """Save alert to history"""
+def save_alert(pair, percent_change, old_rate, new_rate, email_sent, alert_type='percentage_change', trigger_value=None, threshold_value=None):
+    """Save alert to history with type information"""
     conn = get_db()
     c = conn.cursor()
     c.execute('''INSERT INTO alerts 
-                 (pair, percent_change, old_rate, new_rate, timestamp, email_sent)
-                 VALUES (?, ?, ?, ?, ?, ?)''',
+                 (pair, percent_change, old_rate, new_rate, timestamp, email_sent, alert_type, trigger_value, threshold_value)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
               (pair, percent_change, old_rate, new_rate, 
-               datetime.now().isoformat(), 1 if email_sent else 0))
+               datetime.now().isoformat(), 1 if email_sent else 0, alert_type, trigger_value, threshold_value))
     conn.commit()
     conn.close()
-
 def get_alert_history(limit=50):
     """Get recent alerts"""
     conn = get_db()
@@ -127,26 +144,50 @@ def clear_alert_history():
     conn.commit()
     conn.close()
 
+
 def get_alert_preference(pair):
-    """Get alert preference for a specific pair"""
+    """Get alert preference for a specific pair (supports all alert types)"""
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT enabled, custom_threshold, custom_period FROM alert_preferences WHERE pair = ?', (pair,))
+    c.execute('''SELECT enabled, alert_type, custom_threshold, custom_period, enable_trend_consistency,
+                        lookback_years, price_high, price_low, trigger_type, volatility_type,
+                        ma_short_period, ma_long_period, signal_type
+                 FROM alert_preferences WHERE pair = ?''', (pair,))
     result = c.fetchone()
     conn.close()
     
     if result:
         return {
             'enabled': bool(result[0]),
-            'custom_threshold': result[1],
-            'custom_period': result[2]
+            'alert_type': result[1] or 'percentage_change',
+            'custom_threshold': result[2],
+            'custom_period': result[3],
+            'enable_trend_consistency': bool(result[4]),
+            'lookback_years': result[5] or 5,
+            'price_high': result[6],
+            'price_low': result[7],
+            'trigger_type': result[8],
+            'volatility_type': result[9],
+            'ma_short_period': result[10] or 10,
+            'ma_long_period': result[11] or 50,
+            'signal_type': result[12]
         }
     else:
         # Return defaults if not set
         return {
             'enabled': True,
+            'alert_type': 'percentage_change',
             'custom_threshold': None,
-            'custom_period': None
+            'custom_period': None,
+            'enable_trend_consistency': True,
+            'lookback_years': 5,
+            'price_high': None,
+            'price_low': None,
+            'trigger_type': None,
+            'volatility_type': None,
+            'ma_short_period': 10,
+            'ma_long_period': 50,
+            'signal_type': None
         }
 
 def get_all_alert_preferences(currency_pairs):
@@ -156,14 +197,25 @@ def get_all_alert_preferences(currency_pairs):
         preferences[pair] = get_alert_preference(pair)
     return preferences
 
-def set_alert_preference(pair, enabled, custom_threshold=None, custom_period=None):
-    """Set alert preference for a pair"""
+def set_alert_preference(pair, enabled, custom_threshold=None, custom_period=None, alert_type='percentage_change', **kwargs):
+    """Set alert preference for a pair with support for multiple alert types"""
     conn = get_db()
     c = conn.cursor()
     c.execute('''INSERT OR REPLACE INTO alert_preferences 
-                 (pair, enabled, custom_threshold, custom_period)
-                 VALUES (?, ?, ?, ?)''',
-              (pair, 1 if enabled else 0, custom_threshold, custom_period))
+                 (pair, enabled, alert_type, custom_threshold, custom_period,
+                  enable_trend_consistency, lookback_years, price_high, price_low,
+                  trigger_type, volatility_type, ma_short_period, ma_long_period, signal_type)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+              (pair, 1 if enabled else 0, alert_type, custom_threshold, custom_period,
+               kwargs.get('enable_trend_consistency', 1),
+               kwargs.get('lookback_years', 5),
+               kwargs.get('price_high'),
+               kwargs.get('price_low'),
+               kwargs.get('trigger_type'),
+               kwargs.get('volatility_type'),
+               kwargs.get('ma_short_period', 10),
+               kwargs.get('ma_long_period', 50),
+               kwargs.get('signal_type')))
     conn.commit()
     conn.close()
 

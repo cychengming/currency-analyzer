@@ -199,34 +199,174 @@ Backend:
 - Return merged datasets
 ```
 
-### 5.2 Phase 2: Advanced Alerts
+### 5.2 Phase 2: Advanced Alerts (UPDATED - Multi-Condition System)
 | Feature | Priority | Effort | Status |
 |---------|----------|--------|--------|
-| Price level alerts (>1.05, <0.95) | High | 6h | Planned |
-| Percentage change alerts | High | 4h | Planned |
+| Multi-condition alert types (6 types) | High | 12h | In Progress |
 | SMS notifications | Medium | 8h | Planned |
 | Slack webhook integration | Medium | 6h | Planned |
 | Custom alert names/descriptions | Low | 4h | Planned |
 
-**Spec: Price Level Alerts**
+**Spec: Multi-Condition Alert System**
+
+**Alert Type 1: Percentage Change (Current - Enhanced)**
 ```
-Database Schema Addition:
-ALTER TABLE alert_preferences ADD COLUMN alert_type TEXT;
+Condition: Price change exceeds threshold % over detection period
+Parameters:
+  - change_threshold: 0.1 - 20% (default: 2%)
+  - detection_period: 1 - 365 days (default: 30 days)
+  - trend_consistency: boolean (requires 5-day uptrend consistency)
+Example: EUR/USD rises 3% within 30 days with uptrend pattern
+```
+
+**Alert Type 2: Historical High (NEW)**
+```
+Condition: Current price reaches new 5-year high
+Parameters:
+  - lookback_years: 1, 3, 5, 10 (default: 5)
+  - proximity: 0-5% tolerance to all-time high (default: 0% - exact match)
+Example: EUR/USD hits highest price in 5 years
+Database Changes:
+  ADD COLUMN alert_high_5yr_enabled BOOLEAN (or use alert_conditions JSON)
+Calculation: Fetch 5-year historical data, find max, compare with current
+```
+
+**Alert Type 3: Historical Low (NEW)**
+```
+Condition: Current price reaches new 5-year low
+Parameters:
+  - lookback_years: 1, 3, 5, 10 (default: 5)
+  - proximity: 0-5% tolerance (default: 0%)
+Example: EUR/USD drops to lowest price in 5 years
+```
+
+**Alert Type 4: Volatility Threshold (NEW)**
+```
+Condition: Price swings (range) exceed normal volatility
+Parameters:
+  - volatility_type: 'high' or 'low'
+  - lookback_period: 7 - 365 days (default: 30 days)
+  - std_dev_threshold: 1-3x (default: 2x above average std dev)
+Example: EUR/USD volatility 50% higher than 30-day average
+Calculation: Calculate standard deviation of returns over period
+```
+
+**Alert Type 5: Price Level Bands (NEW)**
+```
+Condition: Price crosses above or below user-defined levels
+Parameters:
+  - price_high: Upper threshold (e.g., 1.10 for EUR/USD)
+  - price_low: Lower threshold (e.g., 0.95 for EUR/USD)
+  - trigger_type: 'crosses_above' | 'crosses_below' | 'between'
+Example: Alert when EUR/USD falls below 0.95 or rises above 1.10
+Database Changes:
+  ADD COLUMN price_high REAL
+  ADD COLUMN price_low REAL
+  ADD COLUMN trigger_type TEXT
+```
+
+**Alert Type 6: Moving Average Crossover (NEW)**
+```
+Condition: Short-term MA crosses above/below long-term MA
+Parameters:
+  - short_ma_period: 7 - 50 days (default: 10 days)
+  - long_ma_period: 50 - 365 days (default: 50 days)
+  - signal_type: 'golden_cross' (short > long) | 'death_cross' (short < long)
+Example: EUR/USD 10-day MA crosses above 50-day MA (bullish signal)
+Calculation: Calculate both MAs, detect crossover
+```
+
+**Database Schema Changes:**
+```sql
+-- Replace single alert_preferences with flexible system
+ALTER TABLE alert_preferences ADD COLUMN alert_conditions JSON;
+-- OR: Add multiple condition columns for simpler approach:
+
+ALTER TABLE alert_preferences ADD COLUMN alert_type TEXT DEFAULT 'percentage_change';
+ALTER TABLE alert_preferences ADD COLUMN change_threshold REAL;
+ALTER TABLE alert_preferences ADD COLUMN detection_period INTEGER;
+ALTER TABLE alert_preferences ADD COLUMN lookback_years INTEGER;
 ALTER TABLE alert_preferences ADD COLUMN price_high REAL;
 ALTER TABLE alert_preferences ADD COLUMN price_low REAL;
+ALTER TABLE alert_preferences ADD COLUMN trigger_type TEXT;
+ALTER TABLE alert_preferences ADD COLUMN volatility_type TEXT;
+ALTER TABLE alert_preferences ADD COLUMN ma_short_period INTEGER;
+ALTER TABLE alert_preferences ADD COLUMN ma_long_period INTEGER;
+ALTER TABLE alert_preferences ADD COLUMN signal_type TEXT;
+ALTER TABLE alert_preferences ADD COLUMN enable_trend_consistency BOOLEAN;
 
-API Changes:
-POST /api/alerts/price-level
+-- Enhanced alerts table for history tracking
+ALTER TABLE alerts ADD COLUMN alert_type TEXT;
+ALTER TABLE alerts ADD COLUMN trigger_value REAL;  -- actual price/change that triggered
+ALTER TABLE alerts ADD COLUMN threshold_value REAL;  -- configured threshold
+```
+
+**API Changes:**
+```
+POST /api/alerts/preferences
 {
   "pair": "EUR/USD",
+  "enabled": true,
+  "alert_type": "percentage_change",  // or "historical_high", "volatility", etc.
+  
+  // Percentage Change (Type 1)
+  "change_threshold": 2.5,
+  "detection_period": 30,
+  "enable_trend_consistency": true,
+  
+  // Historical High/Low (Type 2-3)
+  "lookback_years": 5,
+  
+  // Volatility (Type 4)
+  "volatility_type": "high",
+  
+  // Price Levels (Type 5)
   "price_high": 1.10,
   "price_low": 0.95,
-  "enabled": true
+  "trigger_type": "crosses_above",
+  
+  // Moving Average (Type 6)
+  "ma_short_period": 10,
+  "ma_long_period": 50,
+  "signal_type": "golden_cross"
 }
 
-Frontend:
-- New alert type selector: "Trend" vs "Price Level"
-- Input fields for min/max price
+GET /api/alerts/conditions  -- Returns available condition types and parameters
+```
+
+**Frontend UI Changes:**
+```
+Manage Alerts page redesign:
+1. Pair selector (already exists)
+2. Alert Type dropdown:
+   - Percentage Change (current trend detection)
+   - Historical High/Low
+   - Volatility Threshold
+   - Price Level Bands
+   - Moving Average Crossover
+3. Dynamic parameter panel (shows fields based on alert type):
+   - Percentage Change: threshold, period, consistency toggle
+   - Historical: lookback_years selector
+   - Volatility: type selector (high/low)
+   - Price Levels: high/low inputs, trigger type selector
+   - Moving Average: short/long periods, signal type selector
+4. Enable/Disable toggle
+5. Save button
+```
+
+**Example Alert Combinations:**
+```
+User Setup 1: EUR/USD
+- Type: Historical High (5-year)
+- Type: Price Level Bands (crosses above 1.15 or below 0.90)
+- Type: Volatility High (2x above normal)
+All enabled = sends alert if ANY condition triggers
+
+User Setup 2: GBP/USD
+- Type: Percentage Change (3% in 20 days with trend)
+- Type: Moving Average (10-day > 50-day golden cross)
+- Type: Price Level (between 1.25 and 1.35)
+Multiple conditions = more specific, fewer false alerts
 ```
 
 ### 5.3 Phase 3: Data Export & Analysis

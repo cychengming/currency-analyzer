@@ -142,19 +142,99 @@ def create_routes(app, currency_pairs):
     @app.route('/api/alerts/preferences', methods=['GET', 'POST'])
     @login_required
     def api_alert_preferences():
-        """Get or update alert preferences for all pairs"""
+        """Get or update alert preferences for all pairs with multi-condition support"""
         if request.method == 'POST':
             data = request.json
             pair = data.get('pair')
             enabled = data.get('enabled', True)
+            alert_type = data.get('alert_type', 'percentage_change')
+            
+            # Extract parameters based on alert type
             custom_threshold = data.get('custom_threshold')
             custom_period = data.get('custom_period')
+            enable_trend_consistency = data.get('enable_trend_consistency', True)
+            lookback_years = data.get('lookback_years', 5)
+            price_high = data.get('price_high')
+            price_low = data.get('price_low')
+            trigger_type = data.get('trigger_type')
+            volatility_type = data.get('volatility_type')
+            ma_short_period = data.get('ma_short_period', 10)
+            ma_long_period = data.get('ma_long_period', 50)
+            signal_type = data.get('signal_type')
             
-            set_alert_preference(pair, enabled, custom_threshold, custom_period)
+            set_alert_preference(
+                pair, enabled, custom_threshold, custom_period,
+                alert_type=alert_type,
+                enable_trend_consistency=enable_trend_consistency,
+                lookback_years=lookback_years,
+                price_high=price_high,
+                price_low=price_low,
+                trigger_type=trigger_type,
+                volatility_type=volatility_type,
+                ma_short_period=ma_short_period,
+                ma_long_period=ma_long_period,
+                signal_type=signal_type
+            )
             return jsonify({'success': True, 'message': 'Preferences updated for ' + pair})
         else:
             preferences = get_all_alert_preferences(currency_pairs)
             return jsonify(preferences)
+
+    @app.route('/api/alerts/conditions', methods=['GET'])
+    @login_required
+    def api_alert_conditions():
+        """Get available alert condition types and their parameters"""
+        conditions = {
+            'percentage_change': {
+                'name': 'Percentage Change (Trend)',
+                'description': 'Alert when price changes by a percentage over a period',
+                'parameters': {
+                    'change_threshold': {'type': 'number', 'min': 0.1, 'max': 20, 'default': 2, 'unit': '%'},
+                    'detection_period': {'type': 'number', 'min': 1, 'max': 365, 'default': 30, 'unit': 'days'},
+                    'enable_trend_consistency': {'type': 'boolean', 'default': True}
+                }
+            },
+            'historical_high': {
+                'name': 'Historical High',
+                'description': 'Alert when price reaches new high within lookback period',
+                'parameters': {
+                    'lookback_years': {'type': 'select', 'options': [1, 3, 5, 10], 'default': 5}
+                }
+            },
+            'historical_low': {
+                'name': 'Historical Low',
+                'description': 'Alert when price reaches new low within lookback period',
+                'parameters': {
+                    'lookback_years': {'type': 'select', 'options': [1, 3, 5, 10], 'default': 5}
+                }
+            },
+            'price_level': {
+                'name': 'Price Level Bands',
+                'description': 'Alert when price crosses above/below defined levels',
+                'parameters': {
+                    'price_high': {'type': 'number', 'min': 0, 'default': None, 'unit': 'rate'},
+                    'price_low': {'type': 'number', 'min': 0, 'default': None, 'unit': 'rate'},
+                    'trigger_type': {'type': 'select', 'options': ['crosses_above', 'crosses_below', 'between'], 'default': 'crosses_above'}
+                }
+            },
+            'volatility': {
+                'name': 'Volatility Threshold',
+                'description': 'Alert when volatility spikes above or below normal',
+                'parameters': {
+                    'volatility_type': {'type': 'select', 'options': ['high', 'low'], 'default': 'high'}
+                }
+            },
+            'moving_average': {
+                'name': 'Moving Average Crossover',
+                'description': 'Alert on golden cross (bullish) or death cross (bearish)',
+                'parameters': {
+                    'short_ma_period': {'type': 'number', 'min': 7, 'max': 50, 'default': 10, 'unit': 'days'},
+                    'long_ma_period': {'type': 'number', 'min': 50, 'max': 365, 'default': 50, 'unit': 'days'},
+                    'signal_type': {'type': 'select', 'options': ['golden_cross', 'death_cross'], 'default': 'golden_cross'}
+                }
+            }
+        }
+        return jsonify(conditions)
 
     @app.route('/api/alerts/preferences/<path:pair>', methods=['GET'])
     @login_required
@@ -172,6 +252,7 @@ def create_routes(app, currency_pairs):
         return jsonify({'success': True, 'message': 'Alert history cleared'})
 
     # ========== MONITORING ROUTES ==========
+
     
     @app.route('/api/monitoring/start', methods=['POST'])
     @login_required

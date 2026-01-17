@@ -127,3 +127,200 @@ def detect_trend(pair, currency_pairs):
     except Exception as e:
         print("Error detecting trend for " + pair + ": " + str(e))
         return None
+def detect_historical_high(pair, currency_pairs, lookback_years=5):
+    """Detect if currency is at historical high"""
+    try:
+        from modules.database import get_alert_preference
+        
+        pref = get_alert_preference(pair)
+        if not pref['enabled']:
+            return None
+        
+        days_lookback = lookback_years * 365
+        data = fetch_historical_data(pair, days_lookback)
+        
+        if not data or len(data) < 2:
+            return None
+        
+        current_rate = data[-1]['rate']
+        max_rate = max([d['rate'] for d in data])
+        min_rate = min([d['rate'] for d in data])
+        
+        is_high = abs(current_rate - max_rate) < max_rate * 0.001  # Within 0.1%
+        
+        return {
+            'is_high': is_high,
+            'current_rate': round(current_rate, 4),
+            'max_rate': round(max_rate, 4),
+            'min_rate': round(min_rate, 4),
+            'proximity_percent': round(((current_rate - min_rate) / (max_rate - min_rate)) * 100, 2),
+            'lookback_years': lookback_years
+        }
+    except Exception as e:
+        print("Error detecting historical high for " + pair + ": " + str(e))
+        return None
+
+def detect_historical_low(pair, currency_pairs, lookback_years=5):
+    """Detect if currency is at historical low"""
+    try:
+        from modules.database import get_alert_preference
+        
+        pref = get_alert_preference(pair)
+        if not pref['enabled']:
+            return None
+        
+        days_lookback = lookback_years * 365
+        data = fetch_historical_data(pair, days_lookback)
+        
+        if not data or len(data) < 2:
+            return None
+        
+        current_rate = data[-1]['rate']
+        max_rate = max([d['rate'] for d in data])
+        min_rate = min([d['rate'] for d in data])
+        
+        is_low = abs(current_rate - min_rate) < min_rate * 0.001  # Within 0.1%
+        
+        return {
+            'is_low': is_low,
+            'current_rate': round(current_rate, 4),
+            'max_rate': round(max_rate, 4),
+            'min_rate': round(min_rate, 4),
+            'proximity_percent': round(((current_rate - min_rate) / (max_rate - min_rate)) * 100, 2),
+            'lookback_years': lookback_years
+        }
+    except Exception as e:
+        print("Error detecting historical low for " + pair + ": " + str(e))
+        return None
+
+def detect_price_level_cross(pair, currency_pairs, price_high=None, price_low=None, trigger_type='crosses_above'):
+    """Detect if price crosses defined levels"""
+    try:
+        from modules.database import get_alert_preference
+        
+        pref = get_alert_preference(pair)
+        if not pref['enabled']:
+            return None
+        
+        data = fetch_historical_data(pair, 7)  # Check last 7 days
+        
+        if not data or len(data) < 2:
+            return None
+        
+        current_rate = data[-1]['rate']
+        previous_rate = data[-2]['rate']
+        
+        is_triggered = False
+        if trigger_type == 'crosses_above' and price_high:
+            is_triggered = previous_rate < price_high and current_rate >= price_high
+        elif trigger_type == 'crosses_below' and price_low:
+            is_triggered = previous_rate > price_low and current_rate <= price_low
+        elif trigger_type == 'between' and price_high and price_low:
+            is_triggered = price_low <= current_rate <= price_high
+        
+        return {
+            'is_triggered': is_triggered,
+            'current_rate': round(current_rate, 4),
+            'price_high': price_high,
+            'price_low': price_low,
+            'trigger_type': trigger_type
+        }
+    except Exception as e:
+        print("Error detecting price level cross for " + pair + ": " + str(e))
+        return None
+
+def detect_volatility_spike(pair, currency_pairs, lookback_period=30, volatility_type='high'):
+    """Detect if volatility exceeds normal ranges"""
+    try:
+        from modules.database import get_alert_preference
+        import math
+        
+        pref = get_alert_preference(pair)
+        if not pref['enabled']:
+            return None
+        
+        data = fetch_historical_data(pair, lookback_period + 30)
+        
+        if not data or len(data) < lookback_period:
+            return None
+        
+        # Calculate returns
+        recent_data = data[-lookback_period:]
+        recent_returns = [
+            ((recent_data[i]['rate'] - recent_data[i-1]['rate']) / recent_data[i-1]['rate']) * 100
+            for i in range(1, len(recent_data))
+        ]
+        
+        # Calculate standard deviation (volatility)
+        mean_return = sum(recent_returns) / len(recent_returns)
+        variance = sum([(r - mean_return) ** 2 for r in recent_returns]) / len(recent_returns)
+        current_volatility = math.sqrt(variance)
+        
+        # Compare to historical volatility
+        older_data = data[:-lookback_period]
+        older_returns = [
+            ((older_data[i]['rate'] - older_data[i-1]['rate']) / older_data[i-1]['rate']) * 100
+            for i in range(1, len(older_data))
+        ]
+        mean_old = sum(older_returns) / len(older_returns)
+        variance_old = sum([(r - mean_old) ** 2 for r in older_returns]) / len(older_returns)
+        avg_volatility = math.sqrt(variance_old)
+        
+        vol_ratio = current_volatility / avg_volatility if avg_volatility > 0 else 0
+        is_spike = (volatility_type == 'high' and vol_ratio > 2.0) or (volatility_type == 'low' and vol_ratio < 0.5)
+        
+        return {
+            'is_spike': is_spike,
+            'current_volatility': round(current_volatility, 4),
+            'average_volatility': round(avg_volatility, 4),
+            'volatility_ratio': round(vol_ratio, 2),
+            'volatility_type': volatility_type
+        }
+    except Exception as e:
+        print("Error detecting volatility for " + pair + ": " + str(e))
+        return None
+
+def detect_moving_average_crossover(pair, currency_pairs, short_period=10, long_period=50, signal_type='golden_cross'):
+    """Detect moving average crossovers"""
+    try:
+        from modules.database import get_alert_preference
+        
+        pref = get_alert_preference(pair)
+        if not pref['enabled']:
+            return None
+        
+        # Need data for both periods + 1 day to detect crossover
+        lookback = long_period + 1
+        data = fetch_historical_data(pair, lookback)
+        
+        if not data or len(data) < long_period:
+            return None
+        
+        rates = [d['rate'] for d in data]
+        
+        # Calculate short MA
+        short_ma_today = sum(rates[-short_period:]) / short_period
+        short_ma_yesterday = sum(rates[-short_period-1:-1]) / short_period if len(rates) > short_period else short_ma_today
+        
+        # Calculate long MA
+        long_ma_today = sum(rates[-long_period:]) / long_period
+        long_ma_yesterday = sum(rates[-long_period-1:-1]) / long_period if len(rates) > long_period else long_ma_today
+        
+        is_crossover = False
+        if signal_type == 'golden_cross':
+            is_crossover = short_ma_yesterday <= long_ma_yesterday and short_ma_today > long_ma_today
+        elif signal_type == 'death_cross':
+            is_crossover = short_ma_yesterday >= long_ma_yesterday and short_ma_today < long_ma_today
+        
+        return {
+            'is_crossover': is_crossover,
+            'short_ma': round(short_ma_today, 4),
+            'long_ma': round(long_ma_today, 4),
+            'current_rate': round(rates[-1], 4),
+            'signal_type': signal_type,
+            'short_period': short_period,
+            'long_period': long_period
+        }
+    except Exception as e:
+        print("Error detecting MA crossover for " + pair + ": " + str(e))
+        return None
