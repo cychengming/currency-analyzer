@@ -3,59 +3,89 @@
 async function handleLogin() {
     const username = document.getElementById('loginUsername').value;
     const password = document.getElementById('loginPassword').value;
+    const errorDiv = document.getElementById('loginError');
+    
+    if (!username || !password) {
+        errorDiv.textContent = 'Please enter username and password';
+        return;
+    }
     
     try {
-        const result = await fetchAPI('/api/auth/login', {
+        const response = await fetch(`${API_BASE}/api/auth/login`, {
             method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify({ username, password })
         });
         
+        const result = await response.json();
+        
         if (result.success) {
+            errorDiv.textContent = '';
             window.location.href = '/dashboard.html';
         } else {
-            document.getElementById('loginError').textContent = result.error;
+            errorDiv.textContent = result.error || 'Login failed';
         }
     } catch (error) {
-        document.getElementById('loginError').textContent = 'Error logging in';
+        console.error('Login error:', error);
+        errorDiv.textContent = 'Error logging in: ' + error.message;
     }
 }
 
 async function handleRegister() {
     const username = document.getElementById('registerUsername').value;
     const password = document.getElementById('registerPassword').value;
+    const errorDiv = document.getElementById('registerError');
+    
+    if (!username || !password) {
+        errorDiv.textContent = 'Please enter username and password';
+        return;
+    }
     
     try {
-        const result = await fetchAPI('/api/auth/register', {
+        const response = await fetch(`${API_BASE}/api/auth/register`, {
             method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify({ username, password })
         });
         
+        const result = await response.json();
+        
         if (result.success) {
-            document.getElementById('registerError').textContent = '';
+            errorDiv.textContent = '';
             document.getElementById('registerUsername').value = '';
             document.getElementById('registerPassword').value = '';
             document.getElementById('loginError').textContent = 'Registration successful! Please login.';
             switchTab('login');
         } else {
-            document.getElementById('registerError').textContent = result.error;
+            errorDiv.textContent = result.error || 'Registration failed';
         }
     } catch (error) {
-        document.getElementById('registerError').textContent = 'Error registering';
+        console.error('Register error:', error);
+        errorDiv.textContent = 'Error registering: ' + error.message;
     }
 }
 
 async function handleLogout() {
     try {
-        await fetchAPI('/api/auth/logout', { method: 'POST' });
+        await fetch(`${API_BASE}/api/auth/logout`, {
+            method: 'POST',
+            credentials: 'include'
+        });
         window.location.href = '/login.html';
     } catch (error) {
+        console.error('Logout error:', error);
         showToast('Error logging out', 'error');
     }
 }
 
 async function checkAuth() {
     try {
-        const result = await fetchAPI('/api/auth/status');
+        const response = await fetch(`${API_BASE}/api/auth/status`, {
+            credentials: 'include'
+        });
+        const result = await response.json();
         
         if (result && result.logged_in) {
             const userInfo = document.getElementById('userInfo');

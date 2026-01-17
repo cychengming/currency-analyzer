@@ -32,15 +32,26 @@ function switchPage(page) {
 }
 
 async function fetchAPI(endpoint, options = {}) {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-        headers: { 'Content-Type': 'application/json', ...options.headers },
-        ...options
-    });
-    
-    if (response.status === 401) {
-        handleLogout();
+    try {
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+            headers: { 
+                'Content-Type': 'application/json',
+                ...options.headers 
+            },
+            credentials: 'include',
+            ...options
+        });
+        
+        if (response.status === 401) {
+            if (window.location.pathname !== '/login.html' && !window.location.pathname.endsWith('index.html')) {
+                window.location.href = '/login.html';
+            }
+            return null;
+        }
+        
+        return await response.json();
+    } catch (error) {
+        console.error('API Error:', error);
         return null;
     }
-    
-    return response.json();
 }

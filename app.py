@@ -21,8 +21,12 @@ import hashlib
 import secrets
 
 app = Flask(__name__, static_folder='static')
-CORS(app)
+CORS(app, supports_credentials=True)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = False  # Set to True in production with HTTPS
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # 7 days
 
 # ========== CONFIGURATION ==========
 GMAIL_USER = os.environ.get('GMAIL_USER', 'your.email@gmail.com')

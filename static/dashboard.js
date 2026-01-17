@@ -1,4 +1,27 @@
-// Dashboard Module
+async function fetchAPI(endpoint, options = {}) {
+    try {
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+            headers: { 
+                'Content-Type': 'application/json',
+                ...options.headers 
+            },
+            credentials: 'include',
+            ...options
+        });
+        
+        if (response.status === 401) {
+            if (window.location.pathname !== '/login.html') {
+                window.location.href = '/login.html';
+            }
+            return null;
+        }
+        
+        return await response.json();
+    } catch (error) {
+        console.error('API Error:', error);
+        return null;
+    }
+}
 
 let selectedPair = 'EUR/USD';
 let currentTimeframe = 30;
@@ -6,8 +29,12 @@ let chart = null;
 let liveRates = {};
 
 async function initDashboard() {
-    await checkAuth();
+    const authenticated = await checkAuth();
+    if (!authenticated) return;
+    
     loadPages();
+    await loadSettings();
+    await loadAlertPreferences();
     await refreshData();
     
     setInterval(refreshData, 60000);
