@@ -99,7 +99,7 @@ def create_routes(app, currency_pairs):
         rates = fetch_live_rates(currency_pairs)
         return jsonify(rates)
 
-    @app.route('/api/historical/<pair>/<int:days>', methods=['GET'])
+    @app.route('/api/historical/<path:pair>/<int:days>', methods=['GET'])
     @login_required
     def api_historical(pair, days):
         """Get historical data for a pair"""
@@ -156,7 +156,7 @@ def create_routes(app, currency_pairs):
             preferences = get_all_alert_preferences(currency_pairs)
             return jsonify(preferences)
 
-    @app.route('/api/alerts/preferences/<pair>', methods=['GET'])
+    @app.route('/api/alerts/preferences/<path:pair>', methods=['GET'])
     @login_required
     def api_get_pair_preference(pair):
         """Get alert preference for a specific pair"""

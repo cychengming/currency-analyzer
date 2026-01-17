@@ -24,7 +24,8 @@ async function fetchAPI(endpoint, options = {}) {
 }
 
 let selectedPair = 'EUR/USD';
-let currentTimeframe = 30;
+let timeframeUnit = 'days';
+let timeframeValue = 30;
 let chart = null;
 let liveRates = {};
 
@@ -39,6 +40,7 @@ async function initDashboard() {
     }
     
     loadPages();
+    initTimeframeControls();
     await loadSettings();
     await loadAlertPreferences();
     await refreshData();
@@ -69,9 +71,22 @@ function loadPages() {
             </div>
             
             <div class="card">
-                <h2 class="card-title"><span id="selectedPair">EUR/USD</span> Historical Chart</h2>
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                    <h2 class="card-title" style="margin:0;"><span id="selectedPair">EUR/USD</span> Historical Chart</h2>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <label for="timeframeUnit" style="font-size: 13px; color: #94a3b8;">Unit</label>
+                        <select id="timeframeUnit" onchange="changeTimeframeUnit()">
+                            <option value="days" selected>Days</option>
+                            <option value="weeks">Weeks</option>
+                            <option value="months">Months</option>
+                        </select>
+                        <label for="timeframeValue" style="font-size: 13px; color: #94a3b8;">Value</label>
+                        <select id="timeframeValue" onchange="changeTimeframeValue()"></select>
+                    </div>
+                </div>
                 <div class="chart-container">
                     <canvas id="priceChart"></canvas>
+                    <div id="chartEmpty" class="loading" style="display:none;">No historical data available</div>
                 </div>
             </div>
         </div>
@@ -190,49 +205,207 @@ async function selectPair(pair) {
 }
 
 async function fetchHistoricalData() {
-    const encodedPair = encodeURIComponent(selectedPair);
-    const data = await fetchAPI(`/api/historical/${encodedPair}/${currentTimeframe}`);
-    if (data) {
-        updateChart(data);
+    const chartContainer = document.getElementById('priceChart');
+    const emptyState = document.getElementById('chartEmpty');
+    
+    if (chartContainer) chartContainer.style.display = 'none';
+    if (emptyState) emptyState.innerHTML = '<div class="loading" style="text-align:center; padding:20px;">Loading chart data...</div>';
+    if (emptyState) emptyState.style.display = 'block';
+    
+    try {
+        const encodedPair = encodeURIComponent(selectedPair);
+        const days = getTimeframeDays();
+        
+        if (!selectedPair || days <= 0) {
+            showChartError('Invalid pair or timeframe selected');
+            return;
+        }
+        
+        const data = await fetchAPI(`/api/historical/${encodedPair}/${days}`);
+        
+        if (!data) {
+            showChartError('Failed to fetch historical data');
+            return;
+        }
+        
+        if (!Array.isArray(data)) {
+            showChartError('Invalid data format received');
+            return;
+        }
+        
+        if (data.length === 0) {
+            showChartError('No historical data available for selected timeframe');
+            return;
+        }
+        
+        const validData = data.filter(item => 
+            item && typeof item === 'object' && 
+            item.date && item.rate && 
+            !isNaN(parseFloat(item.rate))
+        );
+        
+        if (validData.length === 0) {
+            showChartError('No valid data points in historical data');
+            return;
+        }
+        
+        if (chartContainer) chartContainer.style.display = 'block';
+        if (emptyState) emptyState.style.display = 'none';
+        updateChart(validData);
+    } catch (error) {
+        console.error('Historical data fetch error:', error);
+        showChartError('Error loading chart data: ' + error.message);
+    }
+}
+
+function showChartError(message) {
+    const emptyState = document.getElementById('chartEmpty');
+    const chartContainer = document.getElementById('priceChart');
+    
+    if (chartContainer) chartContainer.style.display = 'none';
+    if (emptyState) {
+        emptyState.innerHTML = '<div class="loading" style="color: #ef4444; text-align:center; padding:20px;">' + message + '</div>';
+        emptyState.style.display = 'block';
+    }
+    
+    if (chart) {
+        chart.destroy();
+        chart = null;
     }
 }
 
 function updateChart(data) {
+    if (!data || !Array.isArray(data) || data.length === 0) {
+        showChartError('No data available to display');
+        return;
+    }
+    
+    const validPoints = data.filter(point => {
+        return point && 
+               typeof point === 'object' &&
+               point.date && 
+               point.rate && 
+               !isNaN(parseFloat(point.rate));
+    });
+    
+    if (validPoints.length === 0) {
+        showChartError('No valid data points to display');
+        return;
+    }
+    
     const ctx = document.getElementById('priceChart').getContext('2d');
+    const emptyState = document.getElementById('chartEmpty');
+    if (emptyState) emptyState.style.display = 'none';
     
-    if (chart) chart.destroy();
+    if (chart) {
+        chart.destroy();
+        chart = null;
+    }
     
-    chart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: data.map(d => d.date),
-            datasets: [{
-                label: selectedPair,
-                data: data.map(d => d.rate),
-                borderColor: '#3b82f6',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                tension: 0.1,
-                fill: true
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { labels: { color: '#f1f5f9' } }
+    try {
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: validPoints.map(d => d.date),
+                datasets: [{
+                    label: selectedPair + ' - ' + getTimeframeLabel(),
+                    data: validPoints.map(d => parseFloat(d.rate)),
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    tension: 0.1,
+                    fill: true
+                }]
             },
-            scales: {
-                y: {
-                    ticks: { color: '#94a3b8' },
-                    grid: { color: '#334155' }
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { labels: { color: '#f1f5f9' } }
                 },
-                x: {
-                    ticks: { color: '#94a3b8' },
-                    grid: { color: '#334155' }
+                scales: {
+                    y: {
+                        ticks: { color: '#94a3b8' },
+                        grid: { color: '#334155' }
+                    },
+                    x: {
+                        ticks: { color: '#94a3b8' },
+                        grid: { color: '#334155' }
+                    }
                 }
             }
-        }
-    });
+        });
+    } catch (error) {
+        console.error('Chart rendering error:', error);
+        showChartError('Error rendering chart: ' + error.message);
+    }
+}
+
+function getTimeframeLabel() {
+    if (timeframeUnit === 'weeks') {
+        return timeframeValue + ' weeks';
+    }
+    if (timeframeUnit === 'months') {
+        return timeframeValue + ' months';
+    }
+    return timeframeValue + ' days';
+}
+
+function initTimeframeControls() {
+    const unitSelect = document.getElementById('timeframeUnit');
+    const valueSelect = document.getElementById('timeframeValue');
+    if (!unitSelect || !valueSelect) return;
+
+    unitSelect.value = timeframeUnit;
+    renderTimeframeOptions(timeframeUnit);
+    valueSelect.value = String(timeframeValue);
+}
+
+function renderTimeframeOptions(unit) {
+    const valueSelect = document.getElementById('timeframeValue');
+    if (!valueSelect) return;
+
+    let options = [];
+    if (unit === 'days') {
+        options = [7, 14, 30, 60, 90, 180, 365];
+    } else if (unit === 'weeks') {
+        options = [4, 8, 12, 24, 52];
+    } else if (unit === 'months') {
+        options = [1, 3, 6, 12, 24];
+    }
+
+    valueSelect.innerHTML = options
+        .map(value => `<option value="${value}">${value}</option>`)
+        .join('');
+
+    if (!options.includes(timeframeValue)) {
+        timeframeValue = options[0];
+    }
+    valueSelect.value = String(timeframeValue);
+}
+
+function changeTimeframeUnit() {
+    const unitSelect = document.getElementById('timeframeUnit');
+    if (!unitSelect) return;
+    timeframeUnit = unitSelect.value;
+    renderTimeframeOptions(timeframeUnit);
+    fetchHistoricalData();
+}
+
+function changeTimeframeValue() {
+    const valueSelect = document.getElementById('timeframeValue');
+    if (!valueSelect) return;
+    timeframeValue = Number(valueSelect.value);
+    fetchHistoricalData();
+}
+
+function getTimeframeDays() {
+    if (timeframeUnit === 'weeks') {
+        return timeframeValue * 7;
+    }
+    if (timeframeUnit === 'months') {
+        return timeframeValue * 30;
+    }
+    return timeframeValue;
 }
 
 async function fetchAlerts() {
