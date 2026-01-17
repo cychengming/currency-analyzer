@@ -108,6 +108,9 @@ function loadPages() {
         <div id="manage" class="page">
             <div class="card">
                 <h2 class="card-title">Alert Preferences by Pair</h2>
+                <p style="color: #94a3b8; margin-bottom: 20px; font-size: 14px;">
+                    Configure multiple alert types per currency pair. Choose from 6 different alert conditions.
+                </p>
                 <div id="alertPreferencesContainer" class="preferences-grid">
                     <div class="loading">Loading preferences...</div>
                 </div>
@@ -497,57 +500,157 @@ async function testEmail() {
 
 async function loadAlertPreferences() {
     const preferences = await fetchAPI('/api/alerts/preferences');
-    if (preferences) {
-        renderAlertPreferences(preferences);
+    const conditions = await fetchAPI('/api/alerts/conditions');
+    if (preferences && conditions) {
+        renderAlertPreferences(preferences, conditions);
     }
 }
 
-function renderAlertPreferences(preferences) {
+function renderAlertPreferences(preferences, conditions) {
     const container = document.getElementById('alertPreferencesContainer');
     
     const pairs = Object.keys(preferences).sort();
     container.innerHTML = pairs.map(pair => {
         const pref = preferences[pair];
+        const alertType = pref.alert_type || 'percentage_change';
+        
+        let parametersHTML = '';
+        if (conditions[alertType]) {
+            const params = conditions[alertType].parameters;
+            parametersHTML = Object.entries(params).map(([paramName, paramConfig]) => {
+                let inputHTML = '';
+                
+                if (paramConfig.type === 'number') {
+                    inputHTML = `<input type="number" 
+                        id="param-${pair}-${paramName}" 
+                        min="${paramConfig.min || 0}" 
+                        max="${paramConfig.max || 100}" 
+                        step="0.1"
+                        value="${pref[paramName] !== undefined && pref[paramName] !== null ? pref[paramName] : paramConfig.default}"
+                        placeholder="Default: ${paramConfig.default}">`;
+                } else if (paramConfig.type === 'select') {
+                    inputHTML = `<select id="param-${pair}-${paramName}" style="width: 100%; padding: 8px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; color: #f1f5f9;">
+                        ${paramConfig.options.map(opt => `<option value="${opt}" ${pref[paramName] === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                    </select>`;
+                } else if (paramConfig.type === 'boolean') {
+                    inputHTML = `<label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="param-${pair}-${paramName}" ${pref[paramName] ? 'checked' : ''} style="width: auto;">
+                        <span>${paramName.replace(/_/g, ' ')}</span>
+                    </label>`;
+                }
+                
+                return `
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label style="margin-bottom: 4px; font-size: 13px;">${paramName.replace(/_/g, ' ')} ${paramConfig.unit ? '(' + paramConfig.unit + ')' : ''}</label>
+                        ${inputHTML}
+                    </div>
+                `;
+            }).join('');
+        }
+        
         return `
-            <div class="pref-item">
-                <div class="form-group">
-                    <label style="margin-bottom: 4px;">Pair</label>
-                    <input type="text" value="${pair}" disabled style="background: #1e293b;">
-                </div>
-                <div class="form-group">
-                    <label style="margin-bottom: 4px;">Threshold (%)</label>
-                    <input type="number" id="threshold-${pair}" min="0.1" max="20" step="0.1" 
-                           value="${pref.custom_threshold || ''}" placeholder="Use default">
-                </div>
-                <div class="form-group">
-                    <label style="margin-bottom: 4px;">Period (days)</label>
-                    <input type="number" id="period-${pair}" min="1" max="365" 
-                           value="${pref.custom_period || ''}" placeholder="Use default">
-                </div>
-                <div style="display: flex; gap: 8px;">
-                    <label style="display: flex; align-items: center; gap: 8px; margin: 0; cursor: pointer;">
+            <div class="pref-item" style="border-left: 4px solid #3b82f6; padding: 16px; background: #0f172a; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div class="form-group" style="flex: 1; margin: 0;">
+                        <label style="margin-bottom: 4px; font-weight: 600;">Pair</label>
+                        <input type="text" value="${pair}" disabled style="background: #1e293b; font-weight: 600;">
+                    </div>
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-left: 12px;">
                         <input type="checkbox" id="enabled-${pair}" ${pref.enabled ? 'checked' : ''} style="width: auto;">
-                        <span>Enabled</span>
+                        <span style="white-space: nowrap;">Enabled</span>
                     </label>
-                    <button class="btn-success" style="padding: 8px 12px; font-size: 12px;" 
-                            onclick="saveAlertPreference('${pair}')">Save</button>
                 </div>
+                
+                <div class="form-group">
+                    <label style="margin-bottom: 4px; font-weight: 600;">Alert Type</label>
+                    <select id="type-${pair}" onchange="updateAlertTypeParameters('${pair}')" style="width: 100%; padding: 12px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; color: #f1f5f9;">
+                        ${Object.entries(conditions).map(([typeKey, typeConfig]) => 
+                            `<option value="${typeKey}" ${alertType === typeKey ? 'selected' : ''}>${typeConfig.name}</option>`
+                        ).join('')}
+                    </select>
+                    <p style="font-size: 12px; color: #94a3b8; margin-top: 4px;">${conditions[alertType]?.description || ''}</p>
+                </div>
+                
+                <div id="params-${pair}" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #334155;">
+                    ${parametersHTML}
+                </div>
+                
+                <button class="btn-success" style="width: 100%; margin-top: 12px; padding: 10px 16px;" 
+                        onclick="saveAlertPreference('${pair}')">Save Alert Configuration</button>
             </div>
         `;
     }).join('');
 }
 
+async function updateAlertTypeParameters(pair) {
+    const newType = document.getElementById(`type-${pair}`).value;
+    const conditions = await fetchAPI('/api/alerts/conditions');
+    if (!conditions) return;
+    const params = conditions[newType]?.parameters || {};
+    
+    let parametersHTML = '';
+    if (params) {
+        parametersHTML = Object.entries(params).map(([paramName, paramConfig]) => {
+            let inputHTML = '';
+            
+            if (paramConfig.type === 'number') {
+                inputHTML = `<input type="number" 
+                    id="param-${pair}-${paramName}" 
+                    min="${paramConfig.min || 0}" 
+                    max="${paramConfig.max || 100}" 
+                    step="0.1"
+                    value="${paramConfig.default}"
+                    placeholder="Default: ${paramConfig.default}">`;
+            } else if (paramConfig.type === 'select') {
+                inputHTML = `<select id="param-${pair}-${paramName}" style="width: 100%; padding: 8px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; color: #f1f5f9;">
+                    ${paramConfig.options.map(opt => `<option value="${opt}" ${opt === paramConfig.default ? 'selected' : ''}>${opt}</option>`).join('')}
+                </select>`;
+            } else if (paramConfig.type === 'boolean') {
+                inputHTML = `<label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="param-${pair}-${paramName}" ${paramConfig.default ? 'checked' : ''} style="width: auto;">
+                    <span>${paramName.replace(/_/g, ' ')}</span>
+                </label>`;
+            }
+            
+            return `
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label style="margin-bottom: 4px; font-size: 13px;">${paramName.replace(/_/g, ' ')} ${paramConfig.unit ? '(' + paramConfig.unit + ')' : ''}</label>
+                    ${inputHTML}
+                </div>
+            `;
+        }).join('');
+    }
+    
+    document.getElementById(`params-${pair}`).innerHTML = parametersHTML;
+}
+
 async function saveAlertPreference(pair) {
+    const alertType = document.getElementById(`type-${pair}`).value;
     const enabled = document.getElementById(`enabled-${pair}`).checked;
-    const thresholdValue = document.getElementById(`threshold-${pair}`).value;
-    const periodValue = document.getElementById(`period-${pair}`).value;
     
     const data = {
         pair: pair,
         enabled: enabled,
-        custom_threshold: thresholdValue ? parseFloat(thresholdValue) : null,
-        custom_period: periodValue ? parseInt(periodValue) : null
+        alert_type: alertType
     };
+    
+    const conditions = await fetchAPI('/api/alerts/conditions');
+    if (!conditions) return;
+    const params = conditions[alertType]?.parameters || {};
+    
+    Object.keys(params).forEach(paramName => {
+        const inputElement = document.getElementById(`param-${pair}-${paramName}`);
+        if (inputElement) {
+            if (params[paramName].type === 'boolean') {
+                data[paramName] = inputElement.checked;
+            } else if (params[paramName].type === 'number') {
+                const value = parseFloat(inputElement.value);
+                data[paramName] = isNaN(value) ? null : value;
+            } else {
+                data[paramName] = inputElement.value || null;
+            }
+        }
+    });
     
     const result = await fetchAPI('/api/alerts/preferences', {
         method: 'POST',
@@ -555,7 +658,7 @@ async function saveAlertPreference(pair) {
     });
     
     if (result && result.success) {
-        showToast(`Preferences saved for ${pair}!`, 'success');
+        showToast(`Alert configuration saved for ${pair}!`, 'success');
         await loadAlertPreferences();
     }
 }

@@ -71,6 +71,9 @@ def init_db():
                   username TEXT UNIQUE NOT NULL,
                   password TEXT NOT NULL,
                   created_at TEXT)''')
+
+    # Apply schema migrations for existing databases
+    _apply_schema_migrations(c)
     
     # Default settings if not exists
     default_settings = {
@@ -88,6 +91,44 @@ def init_db():
     
     conn.commit()
     conn.close()
+
+def _apply_schema_migrations(cursor):
+    """Apply in-place schema migrations for existing databases."""
+    try:
+        cursor.execute("PRAGMA table_info(alert_preferences)")
+        pref_columns = {row[1] for row in cursor.fetchall()}
+
+        pref_additions = {
+            'alert_type': "ALTER TABLE alert_preferences ADD COLUMN alert_type TEXT DEFAULT 'percentage_change'",
+            'enable_trend_consistency': "ALTER TABLE alert_preferences ADD COLUMN enable_trend_consistency INTEGER DEFAULT 1",
+            'lookback_years': "ALTER TABLE alert_preferences ADD COLUMN lookback_years INTEGER DEFAULT 5",
+            'price_high': "ALTER TABLE alert_preferences ADD COLUMN price_high REAL",
+            'price_low': "ALTER TABLE alert_preferences ADD COLUMN price_low REAL",
+            'trigger_type': "ALTER TABLE alert_preferences ADD COLUMN trigger_type TEXT",
+            'volatility_type': "ALTER TABLE alert_preferences ADD COLUMN volatility_type TEXT",
+            'ma_short_period': "ALTER TABLE alert_preferences ADD COLUMN ma_short_period INTEGER DEFAULT 10",
+            'ma_long_period': "ALTER TABLE alert_preferences ADD COLUMN ma_long_period INTEGER DEFAULT 50",
+            'signal_type': "ALTER TABLE alert_preferences ADD COLUMN signal_type TEXT"
+        }
+
+        for col, ddl in pref_additions.items():
+            if col not in pref_columns:
+                cursor.execute(ddl)
+
+        cursor.execute("PRAGMA table_info(alerts)")
+        alert_columns = {row[1] for row in cursor.fetchall()}
+
+        alert_additions = {
+            'alert_type': "ALTER TABLE alerts ADD COLUMN alert_type TEXT",
+            'trigger_value': "ALTER TABLE alerts ADD COLUMN trigger_value REAL",
+            'threshold_value': "ALTER TABLE alerts ADD COLUMN threshold_value REAL"
+        }
+
+        for col, ddl in alert_additions.items():
+            if col not in alert_columns:
+                cursor.execute(ddl)
+    except Exception as e:
+        print("[WARN] Schema migration issue: " + str(e))
 
 def get_setting(key, default=None):
     """Get setting from database"""
