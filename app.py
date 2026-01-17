@@ -5,7 +5,7 @@ Combines web dashboard + monitoring + email alerts
 Can be deployed locally or remotely
 """
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, session
 from flask_cors import CORS
 import requests
 import smtplib
@@ -17,9 +17,12 @@ import time
 import sqlite3
 import json
 import os
+import hashlib
+import secrets
 
 app = Flask(__name__, static_folder='static')
 CORS(app)
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
 # ========== CONFIGURATION ==========
 GMAIL_USER = os.environ.get('GMAIL_USER', 'your.email@gmail.com')
@@ -64,6 +67,13 @@ def init_db():
                   custom_threshold REAL,
                   custom_period INTEGER)''')
     
+    # Users table
+    c.execute('''CREATE TABLE IF NOT EXISTS users
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  username TEXT UNIQUE NOT NULL,
+                  password TEXT NOT NULL,
+                  created_at TEXT)''')
+    
     # Default settings if not exists
     default_settings = {
         'trend_threshold': '2.0',
@@ -80,6 +90,52 @@ def init_db():
     
     conn.commit()
     conn.close()
+
+def hash_password(password):
+    """Hash password with salt"""
+    salt = secrets.token_hex(32)
+    pwd_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+    return f"{salt}${pwd_hash.hex()}"
+
+def verify_password(password, hash_with_salt):
+    """Verify password against hash"""
+    try:
+        salt, pwd_hash = hash_with_salt.split('$')
+        pwd_hash_verify = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+        return pwd_hash_verify.hex() == pwd_hash
+    except:
+        return False
+
+def register_user(username, password):
+    """Register a new user"""
+    try:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        pwd_hash = hash_password(password)
+        c.execute('INSERT INTO users (username, password, created_at) VALUES (?, ?, ?)',
+                  (username, pwd_hash, datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error registering user: {e}")
+        return False
+
+def authenticate_user(username, password):
+    """Authenticate user"""
+    try:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute('SELECT password FROM users WHERE username = ?', (username,))
+        result = c.fetchone()
+        conn.close()
+        
+        if result and verify_password(password, result[0]):
+            return True
+        return False
+    except Exception as e:
+        print(f"Error authenticating user: {e}")
+        return False
 
 def get_setting(key, default=None):
     """Get setting from database"""
@@ -410,19 +466,90 @@ def index():
     """Serve main page"""
     return send_from_directory('static', 'index.html')
 
+@app.route('/api/auth/register', methods=['POST'])
+def api_register():
+    """Register new user"""
+    try:
+        data = request.json
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+        
+        if not username or not password:
+            return jsonify({'success': False, 'error': 'Username and password required'})
+        
+        if len(username) < 3:
+            return jsonify({'success': False, 'error': 'Username must be at least 3 characters'})
+        
+        if len(password) < 6:
+            return jsonify({'success': False, 'error': 'Password must be at least 6 characters'})
+        
+        if register_user(username, password):
+            return jsonify({'success': True, 'message': 'Registration successful'})
+        else:
+            return jsonify({'success': False, 'error': 'Username already exists'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_login():
+    """Login user"""
+    try:
+        data = request.json
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+        
+        if not username or not password:
+            return jsonify({'success': False, 'error': 'Username and password required'})
+        
+        if authenticate_user(username, password):
+            session['username'] = username
+            return jsonify({'success': True, 'message': 'Login successful'})
+        else:
+            return jsonify({'success': False, 'error': 'Invalid username or password'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_logout():
+    """Logout user"""
+    session.clear()
+    return jsonify({'success': True, 'message': 'Logged out'})
+
+@app.route('/api/auth/status', methods=['GET'])
+def api_auth_status():
+    """Get authentication status"""
+    username = session.get('username')
+    return jsonify({
+        'logged_in': username is not None,
+        'username': username
+    })
+
+def login_required(f):
+    """Decorator to require login"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'username' not in session:
+            return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
 @app.route('/api/live-rates', methods=['GET'])
+@login_required
 def api_live_rates():
     """Get current exchange rates"""
     rates = fetch_live_rates()
     return jsonify(rates)
 
 @app.route('/api/historical/<pair>/<int:days>', methods=['GET'])
+@login_required
 def api_historical(pair, days):
     """Get historical data for a pair"""
     data = fetch_historical_data(pair, days)
     return jsonify(data)
 
 @app.route('/api/settings', methods=['GET', 'POST'])
+@login_required
 def api_settings():
     """Get or update settings"""
     if request.method == 'POST':
@@ -443,12 +570,14 @@ def api_settings():
         return jsonify(settings)
 
 @app.route('/api/alerts', methods=['GET'])
+@login_required
 def api_alerts():
     """Get alert history"""
     alerts = get_alert_history()
     return jsonify(alerts)
 
 @app.route('/api/alerts/preferences', methods=['GET', 'POST'])
+@login_required
 def api_alert_preferences():
     """Get or update alert preferences for all pairs"""
     if request.method == 'POST':
@@ -465,6 +594,7 @@ def api_alert_preferences():
         return jsonify(preferences)
 
 @app.route('/api/alerts/preferences/<pair>', methods=['GET'])
+@login_required
 def api_get_pair_preference(pair):
     """Get alert preference for a specific pair"""
     pref = get_alert_preference(pair)
@@ -472,24 +602,28 @@ def api_get_pair_preference(pair):
     return jsonify(pref)
 
 @app.route('/api/alerts/clear', methods=['DELETE'])
+@login_required
 def api_clear_alerts():
     """Clear all alerts from history"""
     clear_alert_history()
     return jsonify({'success': True, 'message': 'Alert history cleared'})
 
 @app.route('/api/monitoring/start', methods=['POST'])
+@login_required
 def api_start_monitoring():
     """Start monitoring"""
     set_setting('monitoring_enabled', 'true')
     return jsonify({'success': True, 'message': 'Monitoring started'})
 
 @app.route('/api/monitoring/stop', methods=['POST'])
+@login_required
 def api_stop_monitoring():
     """Stop monitoring"""
     set_setting('monitoring_enabled', 'false')
     return jsonify({'success': True, 'message': 'Monitoring stopped'})
 
 @app.route('/api/monitoring/status', methods=['GET'])
+@login_required
 def api_monitoring_status():
     """Get monitoring status"""
     return jsonify({
@@ -498,6 +632,7 @@ def api_monitoring_status():
     })
 
 @app.route('/api/test-email', methods=['POST'])
+@login_required
 def api_test_email():
     """Send test email"""
     try:
