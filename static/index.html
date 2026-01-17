@@ -328,6 +328,16 @@
                 <button class="btn-secondary" onclick="testEmail()">Test Email</button>
             </div>
         </div>
+        
+        <div class="card">
+            <h2 class="card-title">Alert Preferences by Pair</h2>
+            <div id="alertPreferencesContainer" style="display: grid; gap: 16px;">
+                <div class="loading">Loading preferences...</div>
+            </div>
+            <div style="margin-top: 20px; display: flex; gap: 12px;">
+                <button class="btn-danger" onclick="clearAlertHistory()">Clear Alert History</button>
+            </div>
+        </div>
     </div>
     
     <div class="toast" id="toast"></div>
@@ -613,10 +623,109 @@
         // Initialize
         async function init() {
             await loadSettings();
+            await loadAlertPreferences();
             await refreshData();
             
             // Auto-refresh every 60 seconds
             setInterval(refreshData, 60000);
+        }
+        
+        // Load alert preferences
+        async function loadAlertPreferences() {
+            try {
+                const response = await fetch(`${API_BASE}/api/alerts/preferences`);
+                const preferences = await response.json();
+                renderAlertPreferences(preferences);
+            } catch (error) {
+                console.error('Error loading preferences:', error);
+            }
+        }
+        
+        // Render alert preferences
+        function renderAlertPreferences(preferences) {
+            const container = document.getElementById('alertPreferencesContainer');
+            
+            const pairs = Object.keys(preferences).sort();
+            container.innerHTML = pairs.map(pair => {
+                const pref = preferences[pair];
+                return `
+                    <div style="background: #334155; padding: 16px; border-radius: 8px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 12px; align-items: end;">
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; font-size: 14px;">Pair</label>
+                                <input type="text" value="${pair}" disabled style="background: #1e293b;">
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; font-size: 14px;">Threshold (%)</label>
+                                <input type="number" id="threshold-${pair}" min="0.1" max="20" step="0.1" 
+                                       value="${pref.custom_threshold || ''}" placeholder="Use default">
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; font-size: 14px;">Period (days)</label>
+                                <input type="number" id="period-${pair}" min="1" max="365" 
+                                       value="${pref.custom_period || ''}" placeholder="Use default">
+                            </div>
+                            <div style="display: flex; gap: 8px; align-items: flex-end;">
+                                <label style="display: flex; align-items: center; gap: 8px; margin: 0; cursor: pointer;">
+                                    <input type="checkbox" id="enabled-${pair}" ${pref.enabled ? 'checked' : ''} style="width: auto;">
+                                    <span>Enabled</span>
+                                </label>
+                                <button class="btn-success" style="padding: 8px 12px; font-size: 12px;" 
+                                        onclick="saveAlertPreference('${pair}')">Save</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Save alert preference
+        async function saveAlertPreference(pair) {
+            try {
+                const enabled = document.getElementById(`enabled-${pair}`).checked;
+                const thresholdValue = document.getElementById(`threshold-${pair}`).value;
+                const periodValue = document.getElementById(`period-${pair}`).value;
+                
+                const data = {
+                    pair: pair,
+                    enabled: enabled,
+                    custom_threshold: thresholdValue ? parseFloat(thresholdValue) : null,
+                    custom_period: periodValue ? parseInt(periodValue) : null
+                };
+                
+                const response = await fetch(`${API_BASE}/api/alerts/preferences`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                if (response.ok) {
+                    showToast(`Preferences saved for ${pair}!`, 'success');
+                    await loadAlertPreferences();
+                }
+            } catch (error) {
+                showToast(`Error saving preferences for ${pair}`, 'error');
+            }
+        }
+        
+        // Clear alert history
+        async function clearAlertHistory() {
+            if (!confirm('Are you sure you want to clear all alert history?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/alerts/clear`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showToast('Alert history cleared!', 'success');
+                    await fetchAlerts();
+                }
+            } catch (error) {
+                showToast('Error clearing alert history', 'error');
+            }
         }
         
         init();

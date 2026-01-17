@@ -57,6 +57,13 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS monitoring_state
                  (pair TEXT PRIMARY KEY, last_alert_time REAL)''')
     
+    # Alert preferences table (per-pair settings)
+    c.execute('''CREATE TABLE IF NOT EXISTS alert_preferences
+                 (pair TEXT PRIMARY KEY,
+                  enabled INTEGER,
+                  custom_threshold REAL,
+                  custom_period INTEGER)''')
+    
     # Default settings if not exists
     default_settings = {
         'trend_threshold': '2.0',
@@ -121,6 +128,62 @@ def get_alert_history(limit=50):
         })
     conn.close()
     return alerts
+
+def get_alert_preference(pair):
+    """Get alert preference for a specific pair"""
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('SELECT enabled, custom_threshold, custom_period FROM alert_preferences WHERE pair = ?', (pair,))
+    result = c.fetchone()
+    conn.close()
+    
+    if result:
+        return {
+            'enabled': bool(result[0]),
+            'custom_threshold': result[1],
+            'custom_period': result[2]
+        }
+    else:
+        # Return defaults if not set
+        return {
+            'enabled': True,
+            'custom_threshold': None,
+            'custom_period': None
+        }
+
+def get_all_alert_preferences():
+    """Get alert preferences for all pairs"""
+    preferences = {}
+    for pair in CURRENCY_PAIRS:
+        preferences[pair] = get_alert_preference(pair)
+    return preferences
+
+def set_alert_preference(pair, enabled, custom_threshold=None, custom_period=None):
+    """Set alert preference for a pair"""
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('''INSERT OR REPLACE INTO alert_preferences 
+                 (pair, enabled, custom_threshold, custom_period)
+                 VALUES (?, ?, ?, ?)''',
+              (pair, 1 if enabled else 0, custom_threshold, custom_period))
+    conn.commit()
+    conn.close()
+
+def delete_alert_from_history(alert_id):
+    """Delete a specific alert from history"""
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('DELETE FROM alerts WHERE id = ?', (alert_id,))
+    conn.commit()
+    conn.close()
+
+def clear_alert_history():
+    """Clear all alerts from history"""
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('DELETE FROM alerts')
+    conn.commit()
+    conn.close()
 
 # ========== CURRENCY DATA FUNCTIONS ==========
 def parse_pair(pair):
@@ -205,8 +268,13 @@ def fetch_historical_data(pair, days):
 def detect_trend(pair):
     """Detect if currency pair shows uptrend"""
     try:
-        detection_period = int(get_setting('detection_period', 30))
-        trend_threshold = float(get_setting('trend_threshold', 2.0))
+        # Get pair-specific settings or use defaults
+        pref = get_alert_preference(pair)
+        if not pref['enabled']:
+            return None
+        
+        detection_period = pref['custom_period'] or int(get_setting('detection_period', 30))
+        trend_threshold = pref['custom_threshold'] or float(get_setting('trend_threshold', 2.0))
         
         data = fetch_historical_data(pair, detection_period)
         
@@ -379,6 +447,35 @@ def api_alerts():
     """Get alert history"""
     alerts = get_alert_history()
     return jsonify(alerts)
+
+@app.route('/api/alerts/preferences', methods=['GET', 'POST'])
+def api_alert_preferences():
+    """Get or update alert preferences for all pairs"""
+    if request.method == 'POST':
+        data = request.json
+        pair = data.get('pair')
+        enabled = data.get('enabled', True)
+        custom_threshold = data.get('custom_threshold')
+        custom_period = data.get('custom_period')
+        
+        set_alert_preference(pair, enabled, custom_threshold, custom_period)
+        return jsonify({'success': True, 'message': f'Preferences updated for {pair}'})
+    else:
+        preferences = get_all_alert_preferences()
+        return jsonify(preferences)
+
+@app.route('/api/alerts/preferences/<pair>', methods=['GET'])
+def api_get_pair_preference(pair):
+    """Get alert preference for a specific pair"""
+    pref = get_alert_preference(pair)
+    pref['pair'] = pair
+    return jsonify(pref)
+
+@app.route('/api/alerts/clear', methods=['DELETE'])
+def api_clear_alerts():
+    """Clear all alerts from history"""
+    clear_alert_history()
+    return jsonify({'success': True, 'message': 'Alert history cleared'})
 
 @app.route('/api/monitoring/start', methods=['POST'])
 def api_start_monitoring():
