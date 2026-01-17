@@ -463,8 +463,18 @@ def monitoring_loop():
 
 @app.route('/')
 def index():
-    """Serve main page"""
-    return send_from_directory('static', 'index.html')
+    """Serve login page"""
+    return send_from_directory('static', 'login.html')
+
+@app.route('/dashboard.html')
+def dashboard():
+    """Serve dashboard page"""
+    return send_from_directory('static', 'dashboard.html')
+
+@app.route('/login.html')
+def login():
+    """Serve login page"""
+    return send_from_directory('static', 'login.html')
 
 @app.route('/api/auth/register', methods=['POST'])
 def api_register():

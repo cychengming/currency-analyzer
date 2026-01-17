@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Currency Market Analyzer - Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="dashboard" id="dashboard">
+        <div class="header">
+            <h1>📈 Currency Market Analyzer</h1>
+            <div class="header-controls">
+                <div class="user-info" id="userInfo">Logged in as: —</div>
+                <div class="status-indicator">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">Monitoring Inactive</span>
+                </div>
+                <button class="btn-success" id="startBtn" onclick="startMonitoring()">Start Monitoring</button>
+                <button class="btn-danger" id="stopBtn" onclick="stopMonitoring()" style="display:none;">Stop Monitoring</button>
+                <button class="btn-danger" onclick="handleLogout()">Logout</button>
+            </div>
+        </div>
+        
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="switchPage('overview')">Overview</button>
+            <button class="nav-tab" onclick="switchPage('alerts')">Alert History</button>
+            <button class="nav-tab" onclick="switchPage('manage')">Manage Alerts</button>
+            <button class="nav-tab" onclick="switchPage('settings')">Settings</button>
+        </div>
+        
+        <!-- Pages Container -->
+        <div id="pagesContainer"></div>
+    </div>
+    
+    <div class="toast" id="toast"></div>
+    
+    <script src="utils.js"></script>
+    <script src="auth.js"></script>
+    <script src="dashboard.js"></script>
+    <script src="pages/overview.js"></script>
+    <script src="pages/alerts.js"></script>
+    <script src="pages/manage.js"></script>
+    <script src="pages/settings.js"></script>
+</body>
+</html>
