@@ -7,10 +7,12 @@ from urllib.parse import unquote
 from modules.auth import login_required, register_user, authenticate_user
 from modules.database import (
     get_setting, set_setting, get_alert_history, clear_alert_history,
-    get_all_alert_preferences, set_alert_preference, get_alert_preference
+    get_all_alert_preferences, set_alert_preference, get_alert_preference,
+    clear_monitoring_state
 )
-from modules.currency import fetch_live_rates, fetch_historical_data
+from modules.currency import fetch_live_rates, fetch_historical_data, fetch_historical_ohlc_data
 from modules.email_alert import send_email_alert
+from modules.backtest import run_backtest
 
 def create_routes(app, currency_pairs):
     """Create and register all API routes"""
@@ -107,6 +109,63 @@ def create_routes(app, currency_pairs):
         data = fetch_historical_data(pair, days)
         return jsonify(data)
 
+    @app.route('/api/historical-ohlc/<path:pair>/<int:days>', methods=['GET'])
+    @login_required
+    def api_historical_ohlc(pair, days):
+        """Get historical OHLC data for a pair."""
+        pair = unquote(pair)
+        data = fetch_historical_ohlc_data(pair, days)
+        return jsonify(data)
+
+    @app.route('/api/backtest', methods=['POST'])
+    @login_required
+    def api_backtest():
+        """Run a simple backtest for a pair given entry/exit rules.
+
+        Expected JSON body:
+        {
+          "pair": "GOLD/USD",
+          "days": 730,
+          "entry": { "type": "long_term_uptrend", ... },
+          "exit": { "max_holding_days": 60, "stop_loss_pct": 5, "take_profit_pct": 10, "signal": {...} },
+          "initial_capital": 10000,
+          "allow_multiple_trades": true
+        }
+        """
+        try:
+            data = request.json or {}
+            pair = data.get('pair')
+            if not pair:
+                return jsonify({'success': False, 'error': 'pair is required'}), 400
+
+            try:
+                days = int(data.get('days', 365))
+            except (TypeError, ValueError):
+                days = 365
+
+            entry = data.get('entry') or {}
+            exit_cfg = data.get('exit') or {}
+            initial_capital = data.get('initial_capital', 10000.0)
+            try:
+                initial_capital = float(initial_capital)
+            except (TypeError, ValueError):
+                initial_capital = 10000.0
+
+            allow_multiple_trades = data.get('allow_multiple_trades', True)
+            allow_multiple_trades = bool(allow_multiple_trades)
+
+            result = run_backtest(
+                pair=str(pair),
+                days=days,
+                entry=entry,
+                exit_cfg=exit_cfg,
+                initial_capital=initial_capital,
+                allow_multiple_trades=allow_multiple_trades,
+            )
+            return jsonify(result)
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
     # ========== SETTINGS ROUTES ==========
     
     @app.route('/api/settings', methods=['GET', 'POST'])
@@ -161,6 +220,63 @@ def create_routes(app, currency_pairs):
             ma_short_period = data.get('ma_short_period', 10)
             ma_long_period = data.get('ma_long_period', 50)
             signal_type = data.get('signal_type')
+
+            # Map UI parameter names (moving_average / other MA-driven conditions)
+            if ma_short_period == 10 and data.get('short_ma_period') is not None:
+                ma_short_period = data.get('short_ma_period')
+            if ma_long_period == 50 and data.get('long_ma_period') is not None:
+                ma_long_period = data.get('long_ma_period')
+
+            # Map UI parameter names (percentage_change)
+            if alert_type == 'percentage_change':
+                if custom_threshold is None:
+                    custom_threshold = data.get('change_threshold')
+                if custom_period is None:
+                    custom_period = data.get('detection_period')
+
+            # Map UI parameter names (long_term_uptrend)
+            if alert_type == 'long_term_uptrend':
+                if custom_threshold is None:
+                    custom_threshold = data.get('change_threshold')
+                if custom_period is None:
+                    custom_period = data.get('detection_period')
+
+            # Normalize numeric inputs (handles string values from clients)
+            try:
+                custom_threshold = float(custom_threshold) if custom_threshold is not None else None
+            except (TypeError, ValueError):
+                custom_threshold = None
+            try:
+                custom_period = int(custom_period) if custom_period is not None else None
+            except (TypeError, ValueError):
+                custom_period = None
+            try:
+                lookback_years = int(lookback_years) if lookback_years is not None else 5
+            except (TypeError, ValueError):
+                lookback_years = 5
+            try:
+                price_high = float(price_high) if price_high is not None else None
+            except (TypeError, ValueError):
+                price_high = None
+            try:
+                price_low = float(price_low) if price_low is not None else None
+            except (TypeError, ValueError):
+                price_low = None
+
+            # Default trigger_type for price level when not provided
+            if alert_type == 'price_level' and not trigger_type:
+                if price_high is not None and price_low is not None:
+                    trigger_type = 'between'
+                else:
+                    trigger_type = 'crosses_above'
+            try:
+                ma_short_period = int(ma_short_period) if ma_short_period is not None else 10
+            except (TypeError, ValueError):
+                ma_short_period = 10
+            try:
+                ma_long_period = int(ma_long_period) if ma_long_period is not None else 50
+            except (TypeError, ValueError):
+                ma_long_period = 50
             
             set_alert_preference(
                 pair, enabled, custom_threshold, custom_period,
@@ -192,6 +308,17 @@ def create_routes(app, currency_pairs):
                     'change_threshold': {'type': 'number', 'min': 0.1, 'max': 20, 'default': 2, 'unit': '%'},
                     'detection_period': {'type': 'number', 'min': 1, 'max': 365, 'default': 30, 'unit': 'days'},
                     'enable_trend_consistency': {'type': 'boolean', 'default': True}
+                }
+            },
+            'long_term_uptrend': {
+                'name': 'Long-Term Upside Trend (Combined)',
+                'description': 'Combined confirmation: % change + bullish MA + positive regression (high confidence)',
+                'parameters': {
+                    'change_threshold': {'type': 'number', 'min': 0.1, 'max': 100, 'default': 5, 'unit': '%'},
+                    'detection_period': {'type': 'number', 'min': 30, 'max': 3650, 'default': 365, 'unit': 'days'},
+                    'enable_trend_consistency': {'type': 'boolean', 'default': True},
+                    'short_ma_period': {'type': 'number', 'min': 7, 'max': 200, 'default': 50, 'unit': 'days'},
+                    'long_ma_period': {'type': 'number', 'min': 50, 'max': 3650, 'default': 200, 'unit': 'days'}
                 }
             },
             'historical_high': {
@@ -249,6 +376,7 @@ def create_routes(app, currency_pairs):
     def api_clear_alerts():
         """Clear all alerts from history"""
         clear_alert_history()
+        clear_monitoring_state()
         return jsonify({'success': True, 'message': 'Alert history cleared'})
 
     # ========== MONITORING ROUTES ==========

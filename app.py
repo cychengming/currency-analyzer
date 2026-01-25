@@ -33,7 +33,11 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # 7 days
 
 # Currency pairs to monitor
-CURRENCY_PAIRS = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'AUD/USD', 'USD/CAD', 'NZD/USD']
+# FX pairs are fetched via frankfurter.app; commodities are fetched via Yahoo Finance.
+CURRENCY_PAIRS = [
+    'EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'AUD/USD', 'USD/CAD', 'NZD/USD',
+    'GOLD/USD', 'SILVER/USD', 'COPPER/USD', 'WHEAT/USD', 'SOYBEAN/USD', 'CORN/USD'
+]
 
 # ========== REGISTER ALL ROUTES ==========
 create_routes(app, CURRENCY_PAIRS)

@@ -27,3 +27,7 @@ ENV/
 *.swo
 *~
 .DS_Store
+
+# Ignore local SQLite databases
+data/*.db
+*.db

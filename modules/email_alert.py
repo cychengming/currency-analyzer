@@ -20,7 +20,7 @@ SMTP_USE_SSL = os.environ.get('SMTP_USE_SSL', 'false').lower() == 'true'
 GMAIL_USER = os.environ.get('GMAIL_USER', '')
 GMAIL_APP_PASSWORD = os.environ.get('GMAIL_PASSWORD', '')
 
-def send_email_alert(pair, trend_info):
+def send_email_alert(pair, alert_info, alert_type='percentage_change'):
     """Send email alert"""
     from modules.database import get_setting
     
@@ -29,11 +29,43 @@ def send_email_alert(pair, trend_info):
         if not alert_email:
             return False
         
-        subject = '[ALERT] Currency Alert: ' + pair + ' Uptrend Detected!'
+        subject = '[ALERT] Currency Alert: ' + pair + ' (' + alert_type + ')'
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         period = str(get_setting('detection_period', 30))
         
-        body = """<html><body style="font-family: Arial, sans-serif; padding: 20px;"><h1 style="color: #2563eb;">Currency Uptrend Alert</h1><div style="background-color: #f0fdf4; padding: 15px; border-left: 4px solid #10b981;"><h2 style="color: #10b981;">""" + pair + """</h2><p style="font-size: 24px;"><strong>Change:</strong> <span style="color: #10b981;">+""" + str(trend_info['percent_change']) + """%</span></p></div><div style="margin-top: 20px;"><p><strong>Start Rate (""" + trend_info['start_date'] + """):</strong> """ + str(trend_info['old_rate']) + """</p><p><strong>Current Rate (""" + trend_info['end_date'] + """):</strong> """ + str(trend_info['new_rate']) + """</p><p><strong>Period:</strong> """ + period + """ days</p></div><p style="color: #6b7280; margin-top: 20px; font-size: 12px;">Alert sent at: """ + timestamp + """</p></body></html>"""
+        percent_change = alert_info.get('percent_change') if isinstance(alert_info, dict) else None
+        old_rate = alert_info.get('old_rate') if isinstance(alert_info, dict) else None
+        new_rate = alert_info.get('new_rate') if isinstance(alert_info, dict) else None
+        current_rate = alert_info.get('current_rate') if isinstance(alert_info, dict) else None
+        start_date = alert_info.get('start_date') if isinstance(alert_info, dict) else None
+        end_date = alert_info.get('end_date') if isinstance(alert_info, dict) else None
+
+        body_parts = [
+            '<html><body style="font-family: Arial, sans-serif; padding: 20px;">',
+            '<h1 style="color: #2563eb;">Currency Alert</h1>',
+            '<div style="background-color: #f0fdf4; padding: 15px; border-left: 4px solid #10b981;">',
+            '<h2 style="color: #10b981;">' + pair + '</h2>',
+            '<p><strong>Alert Type:</strong> ' + alert_type + '</p>'
+        ]
+
+        if percent_change is not None:
+            body_parts.append('<p style="font-size: 20px;"><strong>Change:</strong> <span style="color: #10b981;">' + str(percent_change) + '%</span></p>')
+        if current_rate is not None:
+            body_parts.append('<p><strong>Current Rate:</strong> ' + str(current_rate) + '</p>')
+        if old_rate is not None and new_rate is not None:
+            body_parts.append('<p><strong>Rate:</strong> ' + str(old_rate) + ' → ' + str(new_rate) + '</p>')
+        if start_date and end_date:
+            body_parts.append('<p><strong>Period:</strong> ' + start_date + ' → ' + end_date + '</p>')
+        else:
+            body_parts.append('<p><strong>Period:</strong> ' + period + ' days</p>')
+
+        body_parts.extend([
+            '</div>',
+            '<p style="color: #6b7280; margin-top: 20px; font-size: 12px;">Alert sent at: ' + timestamp + '</p>',
+            '</body></html>'
+        ])
+
+        body = ''.join(body_parts)
         
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject

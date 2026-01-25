@@ -9,25 +9,31 @@ function showToast(message, type = 'success') {
     setTimeout(() => toast.classList.remove('show'), 3000);
 }
 
-function switchTab(tab) {
+function switchTab(tab, evt) {
     const tabBtns = document.querySelectorAll('.tab-btn');
     const tabContents = document.querySelectorAll('.tab-content');
     
     tabBtns.forEach(btn => btn.classList.remove('active'));
     tabContents.forEach(content => content.classList.remove('active'));
     
-    event.target.classList.add('active');
+    const e = evt || window.event;
+    if (e && e.target) {
+        e.target.classList.add('active');
+    }
     document.getElementById(tab + 'Tab').classList.add('active');
 }
 
-function switchPage(page) {
+function switchPage(page, evt) {
     const navTabs = document.querySelectorAll('.nav-tab');
     const pages = document.querySelectorAll('.page');
     
     navTabs.forEach(tab => tab.classList.remove('active'));
     pages.forEach(p => p.classList.remove('active'));
     
-    event.target.classList.add('active');
+    const e = evt || window.event;
+    if (e && e.target) {
+        e.target.classList.add('active');
+    }
     document.getElementById(page).classList.add('active');
 }
 

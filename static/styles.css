@@ -217,6 +217,120 @@ button {
     border-bottom-color: #3b82f6;
 }
 
+/* ========== BACKTEST ========== */
+.bt-stat {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.bt-stat-label {
+    font-size: 12px;
+    color: #94a3b8;
+    margin-bottom: 6px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}
+
+.bt-stat-value {
+    font-size: 18px;
+    font-weight: 800;
+    color: #e2e8f0;
+}
+
+.bt-table {
+    width: 100%;
+    border-collapse: collapse;
+    overflow: hidden;
+    border-radius: 10px;
+    border: 1px solid #334155;
+}
+
+.bt-table th,
+.bt-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #334155;
+    text-align: left;
+    font-size: 13px;
+}
+
+.bt-table th {
+    background: #1e293b;
+    color: #cbd5e1;
+    font-weight: 800;
+}
+
+.bt-table tr:nth-child(even) td {
+    background: rgba(148,163,184,0.06);
+}
+
+.bt-trade-row {
+    cursor: pointer;
+}
+
+.bt-trade-row:hover td {
+    background: rgba(59,130,246,0.10) !important;
+}
+
+.bt-trade-row.selected td {
+    background: rgba(59,130,246,0.18) !important;
+}
+
+.bt-pnl.pos {
+    color: #10b981;
+    font-weight: 800;
+}
+
+.bt-pnl.neg {
+    color: #ef4444;
+    font-weight: 800;
+}
+
+/* ========== MODAL ========== */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+}
+
+.modal {
+    width: 100%;
+    max-width: 720px;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+}
+
+.modal-header {
+    padding: 16px 18px;
+    border-bottom: 1px solid #334155;
+}
+
+.modal-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #f1f5f9;
+}
+
+.modal-body {
+    padding: 16px 18px;
+}
+
+.modal-actions {
+    padding: 14px 18px;
+    border-top: 1px solid #334155;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
 /* ========== PAGES ========== */
 .page {
     display: none;

@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Currency Market Analyzer - Dashboard</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -23,23 +22,23 @@
                 <button class="btn-danger" onclick="handleLogout()">Logout</button>
             </div>
         </div>
-
+        
         <div class="nav-tabs">
-            <button class="nav-tab active" onclick="switchPage('overview', event)">Overview</button>
-            <button class="nav-tab" onclick="switchPage('alerts', event)">Alert History</button>
-            <button class="nav-tab" onclick="switchPage('manage', event)">Manage Alerts</button>
-            <button class="nav-tab" onclick="switchPage('backtest', event)">Backtest</button>
-            <button class="nav-tab" onclick="switchPage('settings', event)">Settings</button>
+            <button class="nav-tab active" onclick="switchPage('overview')">Overview</button>
+            <button class="nav-tab" onclick="switchPage('alerts')">Alert History</button>
+            <button class="nav-tab" onclick="switchPage('manage')">Manage Alerts</button>
+            <button class="nav-tab" onclick="switchPage('settings')">Settings</button>
         </div>
-
+        
+        <!-- Pages Container -->
         <div id="pagesContainer"></div>
     </div>
     
     <div class="toast" id="toast"></div>
     
-    <script src="/static/utils.js?v=20260125"></script>
-    <script src="/static/auth.js?v=20260125"></script>
-    <script src="/static/dashboard.js?v=20260125"></script>
+    <script src="/static/utils.js"></script>
+    <script src="/static/auth.js"></script>
+    <script src="/static/dashboard.js"></script>
     <script src="/static/pages/overview.js"></script>
     <script src="/static/pages/alerts.js"></script>
     <script src="/static/pages/manage.js"></script>

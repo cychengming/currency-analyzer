@@ -186,6 +186,15 @@ def clear_alert_history():
     conn.close()
 
 
+def clear_monitoring_state():
+    """Clear monitoring cooldown state for all pairs"""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('DELETE FROM monitoring_state')
+    conn.commit()
+    conn.close()
+
+
 def get_alert_preference(pair):
     """Get alert preference for a specific pair (supports all alert types)"""
     conn = get_db()

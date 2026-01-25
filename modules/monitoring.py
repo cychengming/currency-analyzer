@@ -13,7 +13,7 @@ def monitoring_loop(currency_pairs):
     """Background monitoring thread with multi-condition alert support"""
     global monitoring_active
     from modules.database import get_setting, get_alert_preference, save_alert, get_monitoring_state, set_monitoring_state
-    from modules.currency import (detect_trend, detect_historical_high, detect_historical_low,
+    from modules.currency import (detect_trend, detect_long_term_uptrend, detect_historical_high, detect_historical_low,
                                   detect_price_level_cross, detect_volatility_spike, detect_moving_average_crossover)
     from modules.email_alert import send_email_alert
     
@@ -29,6 +29,7 @@ def monitoring_loop(currency_pairs):
                     pref = get_alert_preference(pair)
                     
                     if not pref['enabled']:
+                        print('[SKIP] ' + pair + ': disabled')
                         continue
                     
                     # Check cooldown
@@ -38,26 +39,41 @@ def monitoring_loop(currency_pairs):
                         should_alert = False
                     
                     if not should_alert:
+                        print('[SKIP] ' + pair + ': cooldown active')
                         continue
                     
                     # Route to appropriate detection function based on alert type
                     alert_info = None
                     alert_type = pref.get('alert_type', 'percentage_change')
+                    print('[CHECK] ' + pair + ' type=' + str(alert_type))
                     
                     if alert_type == 'percentage_change':
                         alert_info = detect_trend(pair, currency_pairs)
                         if alert_info and alert_info.get('is_trending'):
                             print('[TREND] ' + pair + ': +' + str(alert_info['percent_change']) + '%')
+                        else:
+                            print('[TREND] ' + pair + ': not triggered')
+
+                    elif alert_type == 'long_term_uptrend':
+                        alert_info = detect_long_term_uptrend(pair, currency_pairs)
+                        if alert_info and alert_info.get('is_trending'):
+                            print('[LT] ' + pair + ': uptrend confirmed (+' + str(alert_info.get('percent_change')) + '%)')
+                        else:
+                            print('[LT] ' + pair + ': not triggered')
                     
                     elif alert_type == 'historical_high':
                         alert_info = detect_historical_high(pair, currency_pairs, pref.get('lookback_years', 5))
                         if alert_info and alert_info.get('is_high'):
                             print('[HIGH] ' + pair + ': New ' + str(pref.get('lookback_years', 5)) + '-year high!')
+                        else:
+                            print('[HIGH] ' + pair + ': not triggered')
                     
                     elif alert_type == 'historical_low':
                         alert_info = detect_historical_low(pair, currency_pairs, pref.get('lookback_years', 5))
                         if alert_info and alert_info.get('is_low'):
                             print('[LOW] ' + pair + ': New ' + str(pref.get('lookback_years', 5)) + '-year low!')
+                        else:
+                            print('[LOW] ' + pair + ': not triggered')
                     
                     elif alert_type == 'price_level':
                         alert_info = detect_price_level_cross(pair, currency_pairs,
@@ -66,11 +82,15 @@ def monitoring_loop(currency_pairs):
                                                              pref.get('trigger_type', 'crosses_above'))
                         if alert_info and alert_info.get('is_triggered'):
                             print('[PRICE] ' + pair + ': Price level triggered!')
+                        else:
+                            print('[PRICE] ' + pair + ': not triggered (high=' + str(pref.get('price_high')) + ', low=' + str(pref.get('price_low')) + ', trigger=' + str(pref.get('trigger_type')) + ')')
                     
                     elif alert_type == 'volatility':
                         alert_info = detect_volatility_spike(pair, currency_pairs, volatility_type=pref.get('volatility_type', 'high'))
                         if alert_info and alert_info.get('is_spike'):
                             print('[VOL] ' + pair + ': Volatility spike detected!')
+                        else:
+                            print('[VOL] ' + pair + ': not triggered')
                     
                     elif alert_type == 'moving_average':
                         alert_info = detect_moving_average_crossover(pair, currency_pairs,
@@ -79,6 +99,8 @@ def monitoring_loop(currency_pairs):
                                                                     pref.get('signal_type', 'golden_cross'))
                         if alert_info and alert_info.get('is_crossover'):
                             print('[MA] ' + pair + ': Moving average ' + pref.get('signal_type', 'crossover') + '!')
+                        else:
+                            print('[MA] ' + pair + ': not triggered')
                     
                     # If alert triggered, send notification
                     if alert_info and any([
@@ -94,6 +116,8 @@ def monitoring_loop(currency_pairs):
                                  alert_info.get('old_rate', 0), alert_info.get('new_rate', alert_info.get('current_rate', 0)),
                                  email_sent, alert_type=alert_type)
                         set_monitoring_state(pair, time.time())
+                    else:
+                        print('[NO ALERT] ' + pair + ': no trigger conditions met')
             
             # Sleep for check interval
             interval = int(get_setting('check_interval', 900))
