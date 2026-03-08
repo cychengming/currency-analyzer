@@ -22,6 +22,8 @@ COMMODITY_SYMBOLS = {
     'WHEAT/USD': 'ZW=F',
     'SOYBEAN/USD': 'ZS=F',
     'CORN/USD': 'ZC=F',
+    'WTI/USD': 'CL=F',
+    'BRENT/USD': 'BZ=F',
     'NDX/USD': '^NDX',
 }
 
@@ -33,6 +35,8 @@ COMMODITY_STOOQ_SYMBOLS = {
     'WHEAT/USD': 'zw.f',
     'SOYBEAN/USD': 'zs.f',
     'CORN/USD': 'zc.f',
+    'WTI/USD': 'cl.f',
+    'BRENT/USD': 'bz.f',
     'NDX/USD': '^ndx',
 }
 

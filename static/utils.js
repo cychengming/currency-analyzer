@@ -1,6 +1,23 @@
 // Shared Utilities
 const API_BASE = window.location.origin;
 
+// Unified asset list — single source of truth for all pages.
+// When liveRates are available they take precedence; this is the fallback.
+const DEFAULT_PAIRS = [
+    'EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'AUD/USD', 'USD/CAD', 'NZD/USD',
+    'GOLD/USD', 'SILVER/USD', 'COPPER/USD', 'WHEAT/USD', 'SOYBEAN/USD', 'CORN/USD',
+    'WTI/USD', 'BRENT/USD', 'NDX/USD'
+];
+
+/**
+ * Return the current list of available asset pairs.
+ * Prefers live data keys; falls back to DEFAULT_PAIRS.
+ */
+function getAvailablePairs() {
+    const live = Object.keys(window.liveRates || {}).sort();
+    return (live && live.length) ? live : DEFAULT_PAIRS;
+}
+
 function showToast(message, type = 'success') {
     const toast = document.getElementById('toast');
     if (!toast) return;

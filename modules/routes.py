@@ -12,7 +12,9 @@ from modules.auth import login_required, register_user, authenticate_user
 from modules.database import (
     get_setting, set_setting, get_alert_history, clear_alert_history,
     get_all_alert_preferences, set_alert_preference, get_alert_preference,
-    clear_monitoring_state
+    clear_monitoring_state, create_trade_journal_entry, close_trade_journal_entry,
+    get_trade_journal_entries, get_trade_risk_summary, get_trade_journal_entry,
+    update_trade_journal_entry
 )
 from modules.currency import fetch_live_rates, fetch_historical_data, fetch_historical_ohlc_data
 from modules.email_alert import send_email_alert
@@ -72,6 +74,12 @@ def create_routes(app, currency_pairs):
 
         t = threading.Thread(target=runner, daemon=True)
         t.start()
+
+    def _to_float(value, default=None):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
     
     @app.route('/')
     def index():
@@ -404,9 +412,209 @@ def create_routes(app, currency_pairs):
                 'enable_alerts': get_setting('enable_alerts', 'true') == 'true',
                 'enable_sound': get_setting('enable_sound', 'true') == 'true',
                 'alert_email': get_setting('alert_email', ''),
-                'monitoring_enabled': get_setting('monitoring_enabled', 'false') == 'true'
+                'monitoring_enabled': get_setting('monitoring_enabled', 'false') == 'true',
+                'daily_risk_limit_pct': float(get_setting('daily_risk_limit_pct', 3.0)),
             }
             return jsonify(settings)
+
+    # ========== TRADE RISK / DIARY ROUTES ==========
+
+    @app.route('/api/trade/summary', methods=['GET'])
+    @login_required
+    def api_trade_summary():
+        username = session.get('username')
+        equity = _to_float(request.args.get('equity'), 0.0)
+        planned_risk_usd = _to_float(request.args.get('planned_risk_usd'), 0.0)
+        daily_limit_pct = _to_float(get_setting('daily_risk_limit_pct', 3.0), 3.0)
+        summary = get_trade_risk_summary(username, equity, daily_limit_pct, planned_risk_usd)
+        return jsonify(summary)
+
+    @app.route('/api/trade/diary', methods=['GET', 'POST'])
+    @login_required
+    def api_trade_diary():
+        username = session.get('username')
+
+        if request.method == 'GET':
+            try:
+                limit = int(request.args.get('limit', 50))
+            except (TypeError, ValueError):
+                limit = 50
+            limit = max(1, min(limit, 200))
+            entries = get_trade_journal_entries(username, limit=limit)
+            return jsonify({'success': True, 'entries': entries})
+
+        data = request.json or {}
+        pair = str(data.get('pair') or '').strip()
+        side = str(data.get('side') or 'long').strip().lower()
+        entry_reason = str(data.get('entry_reason') or '').strip()
+        notes = str(data.get('notes') or '').strip()
+        entry_price = _to_float(data.get('entry_price'))
+        stop_price = _to_float(data.get('stop_price'))
+        quantity = _to_float(data.get('quantity'))
+        equity = _to_float(data.get('equity'), 0.0)
+        atr = _to_float(data.get('atr'))
+        sigma = _to_float(data.get('sigma'))
+
+        if not pair:
+            return jsonify({'success': False, 'error': 'pair is required'}), 400
+        if side not in ('long', 'short'):
+            return jsonify({'success': False, 'error': 'side must be long or short'}), 400
+        if not entry_reason:
+            return jsonify({'success': False, 'error': 'entry_reason is required'}), 400
+        if entry_price is None or entry_price <= 0:
+            return jsonify({'success': False, 'error': 'entry_price must be > 0'}), 400
+        if stop_price is None or stop_price <= 0:
+            return jsonify({'success': False, 'error': 'stop_price must be > 0'}), 400
+        if quantity is None or quantity <= 0:
+            return jsonify({'success': False, 'error': 'quantity must be > 0'}), 400
+
+        if side == 'long' and stop_price >= entry_price:
+            return jsonify({'success': False, 'error': 'For long trades, stop price must be below entry price'}), 400
+        if side == 'short' and stop_price <= entry_price:
+            return jsonify({'success': False, 'error': 'For short trades, stop price must be above entry price'}), 400
+
+        risk_amount_usd = abs(entry_price - stop_price) * quantity
+        if risk_amount_usd <= 0:
+            return jsonify({'success': False, 'error': 'risk amount must be > 0'}), 400
+
+        risk_pct_of_equity = None
+        if equity and equity > 0:
+            risk_pct_of_equity = (risk_amount_usd / equity) * 100.0
+
+        daily_limit_pct = _to_float(get_setting('daily_risk_limit_pct', 3.0), 3.0)
+        projected = get_trade_risk_summary(username, equity, daily_limit_pct, planned_risk_usd=risk_amount_usd)
+        if not projected.get('can_open_new_trade', True):
+            return jsonify({
+                'success': False,
+                'error': 'Daily risk limit exceeded. Reduce size or wait until tomorrow.',
+                'summary': projected,
+            }), 400
+
+        entry = create_trade_journal_entry(
+            username=username,
+            pair=pair,
+            side=side,
+            entry_price=entry_price,
+            stop_price=stop_price,
+            quantity=quantity,
+            risk_amount_usd=risk_amount_usd,
+            risk_pct_of_equity=risk_pct_of_equity,
+            atr=atr,
+            sigma=sigma,
+            entry_reason=entry_reason,
+            notes=notes,
+        )
+        summary = get_trade_risk_summary(username, equity, daily_limit_pct)
+        return jsonify({'success': True, 'entry': entry, 'summary': summary})
+
+    @app.route('/api/trade/diary/<int:trade_id>/close', methods=['POST'])
+    @login_required
+    def api_trade_diary_close(trade_id):
+        username = session.get('username')
+        data = request.json or {}
+        close_reason = str(data.get('close_reason') or '').strip()
+        close_price = _to_float(data.get('close_price'))
+        equity = _to_float(data.get('equity'), 0.0)
+
+        if not close_reason:
+            return jsonify({'success': False, 'error': 'close_reason is required'}), 400
+        if close_price is not None and close_price <= 0:
+            return jsonify({'success': False, 'error': 'close_price must be > 0'}), 400
+
+        entry = close_trade_journal_entry(trade_id, username, close_price=close_price, close_reason=close_reason)
+        if not entry:
+            return jsonify({'success': False, 'error': 'trade not found'}), 404
+
+        daily_limit_pct = _to_float(get_setting('daily_risk_limit_pct', 3.0), 3.0)
+        summary = get_trade_risk_summary(username, equity, daily_limit_pct)
+        return jsonify({'success': True, 'entry': entry, 'summary': summary})
+
+    @app.route('/api/trade/diary/<int:trade_id>', methods=['PUT'])
+    @login_required
+    def api_trade_diary_update(trade_id):
+        username = session.get('username')
+        current = get_trade_journal_entry(trade_id, username)
+        if not current:
+            return jsonify({'success': False, 'error': 'trade not found'}), 404
+
+        data = request.json or {}
+        pair = str(data.get('pair', current.get('pair') or '')).strip()
+        side = str(data.get('side', current.get('side') or 'long')).strip().lower()
+        entry_reason = str(data.get('entry_reason', current.get('entry_reason') or '')).strip()
+        notes = str(data.get('notes', current.get('notes') or '')).strip()
+        entry_price = _to_float(data.get('entry_price'), _to_float(current.get('entry_price')))
+        stop_price = _to_float(data.get('stop_price'), _to_float(current.get('stop_price')))
+        quantity = _to_float(data.get('quantity'), _to_float(current.get('quantity')))
+        equity = _to_float(data.get('equity'), 0.0)
+        atr = _to_float(data.get('atr'), _to_float(current.get('atr')))
+        sigma = _to_float(data.get('sigma'), _to_float(current.get('sigma')))
+        status = str(current.get('status') or 'open')
+        close_price = _to_float(data.get('close_price'), _to_float(current.get('close_price')))
+        close_reason = str(data.get('close_reason', current.get('close_reason') or '')).strip()
+
+        if not pair:
+            return jsonify({'success': False, 'error': 'pair is required'}), 400
+        if side not in ('long', 'short'):
+            return jsonify({'success': False, 'error': 'side must be long or short'}), 400
+        if not entry_reason:
+            return jsonify({'success': False, 'error': 'entry_reason is required'}), 400
+        if entry_price is None or entry_price <= 0:
+            return jsonify({'success': False, 'error': 'entry_price must be > 0'}), 400
+        if stop_price is None or stop_price <= 0:
+            return jsonify({'success': False, 'error': 'stop_price must be > 0'}), 400
+        if quantity is None or quantity <= 0:
+            return jsonify({'success': False, 'error': 'quantity must be > 0'}), 400
+
+        if side == 'long' and stop_price >= entry_price:
+            return jsonify({'success': False, 'error': 'For long trades, stop price must be below entry price'}), 400
+        if side == 'short' and stop_price <= entry_price:
+            return jsonify({'success': False, 'error': 'For short trades, stop price must be above entry price'}), 400
+
+        if status == 'closed' and not close_reason:
+            return jsonify({'success': False, 'error': 'close_reason is required for closed trades'}), 400
+        if close_price is not None and close_price <= 0:
+            return jsonify({'success': False, 'error': 'close_price must be > 0'}), 400
+
+        risk_amount_usd = abs(entry_price - stop_price) * quantity
+        if risk_amount_usd <= 0:
+            return jsonify({'success': False, 'error': 'risk amount must be > 0'}), 400
+
+        risk_pct_of_equity = None
+        if equity and equity > 0:
+            risk_pct_of_equity = (risk_amount_usd / equity) * 100.0
+
+        old_risk_amount_usd = _to_float(current.get('risk_amount_usd'), 0.0) or 0.0
+        risk_delta_usd = risk_amount_usd - old_risk_amount_usd
+        daily_limit_pct = _to_float(get_setting('daily_risk_limit_pct', 3.0), 3.0)
+        projected = get_trade_risk_summary(username, equity, daily_limit_pct, planned_risk_usd=risk_delta_usd)
+        if risk_delta_usd > 0 and not projected.get('can_open_new_trade', True):
+            return jsonify({
+                'success': False,
+                'error': 'Editing this trade would exceed the daily risk limit.',
+                'summary': projected,
+            }), 400
+
+        entry = update_trade_journal_entry(
+            trade_id=trade_id,
+            username=username,
+            pair=pair,
+            side=side,
+            entry_price=entry_price,
+            stop_price=stop_price,
+            quantity=quantity,
+            risk_amount_usd=risk_amount_usd,
+            risk_pct_of_equity=risk_pct_of_equity,
+            atr=atr,
+            sigma=sigma,
+            entry_reason=entry_reason,
+            notes=notes,
+            status=status,
+            close_price=close_price,
+            close_reason=close_reason,
+            closed_at=current.get('closed_at'),
+        )
+        summary = get_trade_risk_summary(username, equity, daily_limit_pct)
+        return jsonify({'success': True, 'entry': entry, 'summary': summary})
 
     # ========== ALERT ROUTES ==========
     

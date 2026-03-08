@@ -4,7 +4,7 @@ Database module - Handle all SQLite operations
 
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Database configuration
 DATA_DIR = '/app/data'
@@ -72,6 +72,29 @@ def init_db():
                   password TEXT NOT NULL,
                   created_at TEXT)''')
 
+    # Trade diary / risk journal
+    c.execute('''CREATE TABLE IF NOT EXISTS trade_journal
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  username TEXT NOT NULL,
+                  pair TEXT NOT NULL,
+                  side TEXT NOT NULL,
+                  status TEXT NOT NULL DEFAULT 'open',
+                  entry_price REAL,
+                  stop_price REAL,
+                  close_price REAL,
+                  quantity REAL,
+                  risk_amount_usd REAL,
+                  risk_pct_of_equity REAL,
+                  atr REAL,
+                  sigma REAL,
+                  entry_reason TEXT,
+                  close_reason TEXT,
+                  notes TEXT,
+                  opened_at TEXT,
+                  closed_at TEXT,
+                  created_at TEXT,
+                  updated_at TEXT)''')
+
     # Apply schema migrations for existing databases
     _apply_schema_migrations(c)
     
@@ -83,7 +106,8 @@ def init_db():
         'enable_alerts': 'true',
         'enable_sound': 'true',
         'alert_email': '',
-        'monitoring_enabled': 'false'
+        'monitoring_enabled': 'false',
+        'daily_risk_limit_pct': '3.0'
     }
     
     for key, value in default_settings.items():
@@ -126,6 +150,30 @@ def _apply_schema_migrations(cursor):
 
         for col, ddl in alert_additions.items():
             if col not in alert_columns:
+                cursor.execute(ddl)
+
+        cursor.execute("PRAGMA table_info(trade_journal)")
+        trade_columns = {row[1] for row in cursor.fetchall()}
+
+        trade_additions = {
+            'status': "ALTER TABLE trade_journal ADD COLUMN status TEXT NOT NULL DEFAULT 'open'",
+            'close_price': "ALTER TABLE trade_journal ADD COLUMN close_price REAL",
+            'quantity': "ALTER TABLE trade_journal ADD COLUMN quantity REAL",
+            'risk_amount_usd': "ALTER TABLE trade_journal ADD COLUMN risk_amount_usd REAL",
+            'risk_pct_of_equity': "ALTER TABLE trade_journal ADD COLUMN risk_pct_of_equity REAL",
+            'atr': "ALTER TABLE trade_journal ADD COLUMN atr REAL",
+            'sigma': "ALTER TABLE trade_journal ADD COLUMN sigma REAL",
+            'entry_reason': "ALTER TABLE trade_journal ADD COLUMN entry_reason TEXT",
+            'close_reason': "ALTER TABLE trade_journal ADD COLUMN close_reason TEXT",
+            'notes': "ALTER TABLE trade_journal ADD COLUMN notes TEXT",
+            'opened_at': "ALTER TABLE trade_journal ADD COLUMN opened_at TEXT",
+            'closed_at': "ALTER TABLE trade_journal ADD COLUMN closed_at TEXT",
+            'created_at': "ALTER TABLE trade_journal ADD COLUMN created_at TEXT",
+            'updated_at': "ALTER TABLE trade_journal ADD COLUMN updated_at TEXT"
+        }
+
+        for col, ddl in trade_additions.items():
+            if trade_columns and col not in trade_columns:
                 cursor.execute(ddl)
     except Exception as e:
         print("[WARN] Schema migration issue: " + str(e))
@@ -285,3 +333,254 @@ def set_monitoring_state(pair, last_alert_time):
     c.execute('INSERT OR REPLACE INTO monitoring_state VALUES (?, ?)', (pair, last_alert_time))
     conn.commit()
     conn.close()
+
+
+def _now_iso() -> str:
+    return datetime.now().replace(microsecond=0).isoformat()
+
+
+def _today_window():
+    start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    return start.isoformat(), end.isoformat()
+
+
+def _trade_row_to_dict(row):
+    if not row:
+        return None
+
+    item = dict(row)
+    entry_price = item.get('entry_price')
+    close_price = item.get('close_price')
+    quantity = item.get('quantity')
+    side = str(item.get('side') or 'long').lower()
+    realized_pnl = None
+
+    if entry_price is not None and close_price is not None and quantity is not None:
+        try:
+            entry_price = float(entry_price)
+            close_price = float(close_price)
+            quantity = float(quantity)
+            if side == 'short':
+                realized_pnl = (entry_price - close_price) * quantity
+            else:
+                realized_pnl = (close_price - entry_price) * quantity
+        except (TypeError, ValueError):
+            realized_pnl = None
+
+    item['realized_pnl'] = round(realized_pnl, 4) if realized_pnl is not None else None
+    return item
+
+
+def create_trade_journal_entry(username, pair, side, entry_price, stop_price, quantity, risk_amount_usd,
+                               risk_pct_of_equity=None, atr=None, sigma=None, entry_reason='', notes=''):
+    """Create a new open trade journal entry."""
+    now = _now_iso()
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(
+        '''INSERT INTO trade_journal
+           (username, pair, side, status, entry_price, stop_price, quantity,
+            risk_amount_usd, risk_pct_of_equity, atr, sigma,
+            entry_reason, close_reason, notes, opened_at, closed_at, created_at, updated_at)
+           VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?)''',
+        (
+            username,
+            pair,
+            side,
+            entry_price,
+            stop_price,
+            quantity,
+            risk_amount_usd,
+            risk_pct_of_equity,
+            atr,
+            sigma,
+            entry_reason,
+            notes,
+            now,
+            now,
+            now,
+        )
+    )
+    trade_id = c.lastrowid
+    conn.commit()
+    c.execute('SELECT * FROM trade_journal WHERE id = ? AND username = ?', (trade_id, username))
+    row = c.fetchone()
+    conn.close()
+    return _trade_row_to_dict(row)
+
+
+def get_trade_journal_entry(trade_id, username):
+    """Get a single trade journal entry for a user."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM trade_journal WHERE id = ? AND username = ?', (trade_id, username))
+    row = c.fetchone()
+    conn.close()
+    return _trade_row_to_dict(row)
+
+
+def close_trade_journal_entry(trade_id, username, close_price=None, close_reason=''):
+    """Close an existing open trade journal entry."""
+    now = _now_iso()
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM trade_journal WHERE id = ? AND username = ?', (trade_id, username))
+    current = c.fetchone()
+    if not current:
+        conn.close()
+        return None
+
+    c.execute(
+        '''UPDATE trade_journal
+           SET status = 'closed', close_price = ?, close_reason = ?, closed_at = ?, updated_at = ?
+           WHERE id = ? AND username = ?''',
+        (close_price, close_reason, now, now, trade_id, username)
+    )
+    conn.commit()
+    c.execute('SELECT * FROM trade_journal WHERE id = ? AND username = ?', (trade_id, username))
+    row = c.fetchone()
+    conn.close()
+    return _trade_row_to_dict(row)
+
+
+def update_trade_journal_entry(trade_id, username, pair, side, entry_price, stop_price, quantity,
+                               risk_amount_usd, risk_pct_of_equity=None, atr=None, sigma=None,
+                               entry_reason='', notes='', status='open', close_price=None,
+                               close_reason=None, closed_at=None):
+    """Update an existing trade journal entry."""
+    now = _now_iso()
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM trade_journal WHERE id = ? AND username = ?', (trade_id, username))
+    current = c.fetchone()
+    if not current:
+        conn.close()
+        return None
+
+    if status == 'open':
+        close_price = None
+        close_reason = None
+        closed_at = None
+    elif closed_at is None:
+        closed_at = current['closed_at'] or now
+
+    c.execute(
+        '''UPDATE trade_journal
+           SET pair = ?, side = ?, status = ?, entry_price = ?, stop_price = ?, close_price = ?,
+               quantity = ?, risk_amount_usd = ?, risk_pct_of_equity = ?, atr = ?, sigma = ?,
+               entry_reason = ?, close_reason = ?, notes = ?, closed_at = ?, updated_at = ?
+           WHERE id = ? AND username = ?''',
+        (
+            pair,
+            side,
+            status,
+            entry_price,
+            stop_price,
+            close_price,
+            quantity,
+            risk_amount_usd,
+            risk_pct_of_equity,
+            atr,
+            sigma,
+            entry_reason,
+            close_reason,
+            notes,
+            closed_at,
+            now,
+            trade_id,
+            username,
+        )
+    )
+    conn.commit()
+    c.execute('SELECT * FROM trade_journal WHERE id = ? AND username = ?', (trade_id, username))
+    row = c.fetchone()
+    conn.close()
+    return _trade_row_to_dict(row)
+
+
+def get_trade_journal_entries(username, limit=50):
+    """Get recent trade journal entries for a user."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(
+        '''SELECT * FROM trade_journal
+           WHERE username = ?
+           ORDER BY opened_at DESC, id DESC
+           LIMIT ?''',
+        (username, int(limit))
+    )
+    rows = c.fetchall()
+    conn.close()
+    return [_trade_row_to_dict(row) for row in rows]
+
+
+def get_trade_risk_summary(username, equity, daily_limit_pct, planned_risk_usd=0.0):
+    """Summarize today's risk usage and current active exposure for a user."""
+    try:
+        equity = float(equity or 0)
+    except (TypeError, ValueError):
+        equity = 0.0
+
+    try:
+        daily_limit_pct = float(daily_limit_pct or 0)
+    except (TypeError, ValueError):
+        daily_limit_pct = 0.0
+
+    try:
+        planned_risk_usd = float(planned_risk_usd or 0)
+    except (TypeError, ValueError):
+        planned_risk_usd = 0.0
+
+    today_start, tomorrow_start = _today_window()
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute(
+        '''SELECT
+               COUNT(*) AS trade_count,
+               COALESCE(SUM(risk_amount_usd), 0) AS opened_today_risk_usd
+           FROM trade_journal
+           WHERE username = ?
+             AND opened_at >= ?
+             AND opened_at < ?''',
+        (username, today_start, tomorrow_start)
+    )
+    opened_row = c.fetchone()
+
+    c.execute(
+        '''SELECT
+               COUNT(*) AS open_trade_count,
+               COALESCE(SUM(risk_amount_usd), 0) AS active_risk_usd
+           FROM trade_journal
+           WHERE username = ?
+             AND status = 'open' ''',
+        (username,)
+    )
+    active_row = c.fetchone()
+    conn.close()
+
+    opened_today_risk_usd = float((opened_row['opened_today_risk_usd'] if opened_row else 0) or 0)
+    active_risk_usd = float((active_row['active_risk_usd'] if active_row else 0) or 0)
+    trade_count = int((opened_row['trade_count'] if opened_row else 0) or 0)
+    open_trade_count = int((active_row['open_trade_count'] if active_row else 0) or 0)
+    daily_limit_usd = equity * (daily_limit_pct / 100.0) if equity > 0 and daily_limit_pct > 0 else 0.0
+    projected_opened_today = opened_today_risk_usd + planned_risk_usd
+    remaining_risk_usd = daily_limit_usd - opened_today_risk_usd
+    projected_remaining_risk_usd = daily_limit_usd - projected_opened_today
+    can_open_new_trade = True if daily_limit_usd <= 0 else projected_opened_today <= (daily_limit_usd + 1e-9)
+
+    return {
+        'equity': round(equity, 4),
+        'daily_limit_pct': round(daily_limit_pct, 4),
+        'daily_limit_usd': round(daily_limit_usd, 4),
+        'opened_today_risk_usd': round(opened_today_risk_usd, 4),
+        'active_risk_usd': round(active_risk_usd, 4),
+        'planned_risk_usd': round(planned_risk_usd, 4),
+        'projected_opened_today_risk_usd': round(projected_opened_today, 4),
+        'remaining_risk_usd': round(remaining_risk_usd, 4),
+        'projected_remaining_risk_usd': round(projected_remaining_risk_usd, 4),
+        'today_trade_count': trade_count,
+        'open_trade_count': open_trade_count,
+        'can_open_new_trade': can_open_new_trade,
+    }

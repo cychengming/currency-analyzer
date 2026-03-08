@@ -79,7 +79,7 @@ app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # 7 days
 CURRENCY_PAIRS = [
     'EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'AUD/USD', 'USD/CAD', 'NZD/USD',
     'GOLD/USD', 'SILVER/USD', 'COPPER/USD', 'WHEAT/USD', 'SOYBEAN/USD', 'CORN/USD',
-    'NDX/USD'
+    'WTI/USD', 'BRENT/USD', 'NDX/USD'
 ]
 
 # ========== REGISTER ALL ROUTES ==========

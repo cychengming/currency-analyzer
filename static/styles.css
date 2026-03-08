@@ -504,7 +504,7 @@ label {
     color: #cbd5e1;
 }
 
-input, select {
+input, select, textarea {
     width: 100%;
     padding: 12px;
     background: #0f172a;
@@ -514,9 +514,21 @@ input, select {
     font-size: 14px;
 }
 
-input:focus, select:focus {
+textarea {
+    resize: vertical;
+    min-height: 44px;
+}
+
+input:focus, select:focus, textarea:focus {
     outline: none;
     border-color: #3b82f6;
+}
+
+input[disabled],
+select[disabled],
+textarea[disabled] {
+    opacity: 0.65;
+    cursor: not-allowed;
 }
 
 .error-msg {

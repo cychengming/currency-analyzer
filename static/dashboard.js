@@ -334,11 +334,112 @@ function loadPages() {
                         </div>
                     </div>
 
-                    <div style="display:flex; gap: 10px; margin-top: 8px; flex-wrap: wrap;">
-                        <button class="btn-secondary" onclick="computePositionSizing()">Position Size</button>
+                    <div style="margin-top: 14px; display:grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items:end;">
+                        <div class="form-group">
+                            <label>Daily Risk Limit (%)</label>
+                            <input type="number" id="tradeDailyRiskLimitPct" min="0.1" step="0.1" value="3.0">
+                        </div>
+                        <div style="display:flex; gap: 10px; flex-wrap: wrap; justify-content:flex-end;">
+                            <button class="btn-secondary" onclick="computePositionSizing()">Position Size</button>
+                            <button class="btn-secondary" onclick="saveTradeRiskLimit()">Save Daily Limit</button>
+                            <button class="btn-primary" onclick="refreshTradeRiskSummary()">Refresh Daily Budget</button>
+                        </div>
                     </div>
 
                     <div id="tradeSizing" style="margin-top: 10px; color:#cbd5e1; font-size: 13px;"></div>
+
+                    <div id="tradeRiskSummary" style="margin-top: 14px;"></div>
+
+                    <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid #334155;">
+                        <h3 style="margin: 0 0 8px 0;">Trade Diary</h3>
+                        <p style="color: #94a3b8; margin-bottom: 12px; font-size: 13px;">
+                            Use a popup to log or edit entry and exit reasons. New trades are blocked when today's opened risk exceeds the daily limit.
+                        </p>
+                        <div style="display:flex; gap: 10px; margin-top: 8px; flex-wrap: wrap;">
+                            <button class="btn-success" onclick="openTradeDiaryModal('create')">New Diary Entry</button>
+                            <button class="btn-secondary" onclick="openTradeDiaryModal('create', null, true)">New Entry From Latest Sizing</button>
+                            <button class="btn-secondary" onclick="loadTradeDiary()">Refresh Diary</button>
+                        </div>
+
+                        <div id="tradeDiaryStatus" class="loading" style="display:none; margin-top: 12px;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: 16px;">
+                <h2 class="card-title">Trade Diary</h2>
+                <div id="tradeDiaryList" class="alert-list">
+                    <div class="loading">No trade journal entries yet</div>
+                </div>
+            </div>
+
+            <div id="tradeDiaryModalBackdrop" class="modal-backdrop" style="display:none;" onclick="handleTradeDiaryModalBackdrop(event)">
+                <div class="modal" style="max-width: 920px;" onclick="event.stopPropagation()">
+                    <div class="modal-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+                        <div>
+                            <div class="modal-title" id="tradeDiaryModalTitle">Trade Diary Entry</div>
+                            <div id="tradeDiaryModalSubtitle" style="color:#94a3b8; font-size: 13px; margin-top: 4px;"></div>
+                        </div>
+                        <button class="btn-secondary" style="width:auto;" onclick="closeTradeDiaryModal()">Close</button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="tradeDiaryModalStatus" class="loading" style="display:none; margin-bottom: 12px;"></div>
+                        <div id="tradeDiaryModalContext" style="display:none; margin-bottom: 12px; padding: 12px; border-radius: 8px; background: #0f172a; color:#cbd5e1; font-size: 13px;"></div>
+                        <div id="tradeDiaryModalBaseFields" style="display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px;">
+                            <div class="form-group">
+                                <label>Asset</label>
+                                <select id="tradeDiaryAsset"></select>
+                            </div>
+                            <div class="form-group">
+                                <label>Side</label>
+                                <select id="tradeDiarySide">
+                                    <option value="long" selected>Long</option>
+                                    <option value="short">Short</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Entry Price</label>
+                                <input type="number" id="tradeDiaryEntryPrice" min="0" step="0.0001">
+                            </div>
+                            <div class="form-group">
+                                <label>Stop Price</label>
+                                <input type="number" id="tradeDiaryStopPrice" min="0" step="0.0001">
+                            </div>
+                        </div>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; align-items:end;">
+                            <div class="form-group" style="margin:0;">
+                                <label>Quantity</label>
+                                <input type="number" id="tradeDiaryQuantity" min="0" step="0.0001">
+                            </div>
+                            <div style="display:flex; justify-content:flex-end; gap:10px; flex-wrap: wrap;">
+                                <button class="btn-secondary" style="width:auto;" id="tradeDiaryModalFillBtn" onclick="applyTradeSizingToDiary()">Use Latest Sizing</button>
+                            </div>
+                        </div>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px;">
+                            <div class="form-group">
+                                <label>Why Enter?</label>
+                                <textarea id="tradeDiaryEntryReason" rows="5" placeholder="Document the setup, trigger, invalidation, and what you expect."></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Notes</label>
+                                <textarea id="tradeDiaryNotes" rows="5" placeholder="Checklist, catalyst, emotion, mistakes, execution notes."></textarea>
+                            </div>
+                        </div>
+                        <div id="tradeDiaryModalCloseFields" style="display:none; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px;">
+                            <div class="form-group">
+                                <label>Close Price</label>
+                                <input type="number" id="tradeDiaryClosePrice" min="0" step="0.0001" placeholder="Optional unless you want realized P/L saved">
+                            </div>
+                            <div class="form-group">
+                                <label>Why Close?</label>
+                                <textarea id="tradeDiaryCloseReason" rows="5" placeholder="What changed? Why are you exiting? What did you learn?"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn-secondary" style="width:auto;" onclick="closeTradeDiaryModal()">Cancel</button>
+                        <button class="btn-primary" style="width:auto;" id="tradeDiaryModalSaveBtn" onclick="saveTradeDiaryModal()">Save</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -448,9 +549,7 @@ async function fetchLiveRates() {
 }
 
 function _populateDlAssetSelects() {
-    const pairs = Object.keys(liveRates || {}).sort();
-    const defaults = ['GOLD/USD', 'SILVER/USD', 'EUR/USD', 'GBP/USD', 'AUD/USD', 'NZD/USD', 'USD/CAD', 'USD/CHF', 'USD/JPY', 'NDX/USD'];
-    const options = (pairs && pairs.length) ? pairs : defaults;
+    const options = getAvailablePairs();
 
     function fill(selectId, currentValue) {
         const el = document.getElementById(selectId);
@@ -1333,6 +1432,10 @@ async function loadSettings() {
         document.getElementById('detectionPeriod').value = settings.detection_period;
         document.getElementById('checkInterval').value = settings.check_interval;
         document.getElementById('alertEmail').value = settings.alert_email;
+        const tradeDailyRiskLimitPct = document.getElementById('tradeDailyRiskLimitPct');
+        if (tradeDailyRiskLimitPct && settings.daily_risk_limit_pct !== undefined) {
+            tradeDailyRiskLimitPct.value = settings.daily_risk_limit_pct;
+        }
     }
 }
 

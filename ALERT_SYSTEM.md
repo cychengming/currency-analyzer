@@ -248,7 +248,7 @@ Trading Signal: Buy setup
 
 **Supported Pairs**:
 - FX: EUR/USD, GBP/USD, USD/JPY, USD/CHF, AUD/USD, USD/CAD, NZD/USD
-- Commodities: GOLD/USD, SILVER/USD, COPPER/USD, WHEAT/USD, SOYBEAN/USD, CORN/USD
+- Commodities: GOLD/USD, SILVER/USD, COPPER/USD, WHEAT/USD, SOYBEAN/USD, CORN/USD, WTI/USD (WTI Crude), BRENT/USD (Brent Crude)
 - Indices: NDX/USD (NASDAQ-100)
 
 ### 3.2 Via API
