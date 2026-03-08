@@ -20,13 +20,55 @@ import os
 import secrets
 from datetime import datetime
 
+
+def _get_persistent_secret_key() -> str:
+    """Return a stable SECRET_KEY.
+
+    Priority:
+      1) SECRET_KEY env var (recommended)
+      2) A key persisted in the mounted /app/data volume
+
+    This prevents session cookies from being invalidated on container restarts.
+    """
+
+    env_key = os.environ.get('SECRET_KEY')
+    if env_key:
+        return env_key
+
+    data_dir = os.environ.get('DATA_DIR', '/app/data')
+    key_path = os.path.join(data_dir, '.flask_secret_key')
+
+    try:
+        if os.path.exists(key_path):
+            with open(key_path, 'r', encoding='utf-8') as f:
+                k = f.read().strip()
+                if k:
+                    return k
+    except Exception:
+        # Fall back to generating a new key below
+        pass
+
+    k = secrets.token_hex(32)
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+        with open(key_path, 'w', encoding='utf-8') as f:
+            f.write(k)
+        try:
+            os.chmod(key_path, 0o600)
+        except Exception:
+            pass
+    except Exception:
+        # If we can't persist, at least run with a generated key
+        pass
+    return k
+
 # Import modular components
 from modules import init_db, create_routes, start_monitoring
 
 # Initialize Flask app
 app = Flask(__name__, static_folder='static')
 CORS(app, supports_credentials=True)
-app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+app.secret_key = _get_persistent_secret_key()
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = False  # Set to True in production with HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -36,7 +78,8 @@ app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # 7 days
 # FX pairs are fetched via frankfurter.app; commodities are fetched via Yahoo Finance.
 CURRENCY_PAIRS = [
     'EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'AUD/USD', 'USD/CAD', 'NZD/USD',
-    'GOLD/USD', 'SILVER/USD', 'COPPER/USD', 'WHEAT/USD', 'SOYBEAN/USD', 'CORN/USD'
+    'GOLD/USD', 'SILVER/USD', 'COPPER/USD', 'WHEAT/USD', 'SOYBEAN/USD', 'CORN/USD',
+    'NDX/USD'
 ]
 
 # ========== REGISTER ALL ROUTES ==========

@@ -277,6 +277,144 @@ function loadPages() {
                 </div>
             </div>
         </div>
+
+        <!-- Trade Page (Risk Management) -->
+        <div id="trade" class="page">
+            <div class="card">
+                <h2 class="card-title">Trade</h2>
+                <p style="color: #94a3b8; margin-bottom: 12px; font-size: 14px;">
+                    Select an asset to see ATR(14) and daily σ (252d) for risk management.
+                </p>
+
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+                    <div class="form-group">
+                        <label>Asset</label>
+                        <select id="tradeAsset"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>History Window (days)</label>
+                        <input type="number" id="tradeDays" min="300" step="10" value="800">
+                    </div>
+                    <div class="form-group" style="display:flex; align-items:end; gap:10px;">
+                        <button class="btn-primary" style="width:auto;" onclick="loadTradeMetrics()">Compute</button>
+                        <button class="btn-secondary" style="width:auto;" onclick="tradeUseSelectedPair()">Use Selected Pair</button>
+                    </div>
+                </div>
+
+                <div id="tradeStatus" class="loading" style="display:none; margin-top: 12px;"></div>
+
+                <div id="tradeMetrics" style="display:none; margin-top: 14px; padding-top: 14px; border-top: 1px solid #334155;">
+                    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+                        <div class="card" style="margin:0;">
+                            <h3 style="margin:0 0 6px 0;">ATR(14)</h3>
+                            <div id="tradeAtr" style="color:#cbd5e1; font-size: 14px;"></div>
+                        </div>
+                        <div class="card" style="margin:0;">
+                            <h3 style="margin:0 0 6px 0;">Daily σ (252d)</h3>
+                            <div id="tradeSigma" style="color:#cbd5e1; font-size: 14px;"></div>
+                        </div>
+                        <div class="card" style="margin:0;">
+                            <h3 style="margin:0 0 6px 0;">Latest Close</h3>
+                            <div id="tradeClose" style="color:#cbd5e1; font-size: 14px;"></div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 14px; display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+                        <div class="form-group">
+                            <label>Account Equity (USD)</label>
+                            <input type="number" id="tradeEquity" min="0" step="100" value="10000">
+                        </div>
+                        <div class="form-group">
+                            <label>Risk per Trade (%)</label>
+                            <input type="number" id="tradeRiskPct" min="0" step="0.1" value="1">
+                        </div>
+                        <div class="form-group">
+                            <label>Stop = ATR ×</label>
+                            <input type="number" id="tradeAtrMult" min="0.1" step="0.1" value="2">
+                        </div>
+                    </div>
+
+                    <div style="display:flex; gap: 10px; margin-top: 8px; flex-wrap: wrap;">
+                        <button class="btn-secondary" onclick="computePositionSizing()">Position Size</button>
+                    </div>
+
+                    <div id="tradeSizing" style="margin-top: 10px; color:#cbd5e1; font-size: 13px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Forecast Page (DL - Optional) -->
+        <div id="forecast" class="page">
+            <div class="card">
+                <h2 class="card-title">Latest Forecast</h2>
+                <div style="display:grid; grid-template-columns: 1fr 2fr; gap: 12px; align-items:end; margin-bottom: 10px;">
+                    <div class="form-group" style="margin:0;">
+                        <label>Asset</label>
+                        <select id="dlForecastAsset"></select>
+                    </div>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn-primary" style="width:auto;" onclick="loadLatestForecast()">Load</button>
+                        <button class="btn-secondary" style="width:auto;" onclick="forecastUseSelectedPair()">Use Selected Pair</button>
+                    </div>
+                </div>
+                <div id="dlForecastMeta" style="color: #94a3b8; font-size: 13px; margin-bottom: 10px;"></div>
+                <div style="height: 320px; position: relative;">
+                    <canvas id="dlForecastChart"></canvas>
+                    <div id="dlForecastStatus" class="loading" style="display:none;">Loading forecast...</div>
+                    <div id="dlForecastEmpty" class="loading" style="display:none;">No forecast data available</div>
+                </div>
+
+                <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid #334155;">
+                    <h3 style="margin: 0 0 8px 0;">Raw Response</h3>
+                    <pre id="dlForecastContent" style="display:none; white-space: pre-wrap; word-break: break-word; color: #cbd5e1; font-size: 12px;"></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Deep Learning Trigger Page -->
+        <div id="deepLearning" class="page">
+            <div class="card">
+                <h2 class="card-title">Deep Learning</h2>
+                <p style="color: #94a3b8; margin-bottom: 12px; font-size: 14px;">
+                    Run ingest + training to generate a new forecast run in Postgres.
+                </p>
+
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+                    <div class="form-group">
+                        <label>Asset</label>
+                        <select id="dlAsset"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>Ingest Years</label>
+                        <input type="number" id="dlYears" min="1" step="1" value="30">
+                    </div>
+                    <div class="form-group">
+                        <label>Model</label>
+                        <select id="dlModel">
+                            <option value="gru" selected>GRU</option>
+                            <option value="lstm">LSTM</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Lookback Days</label>
+                        <input type="number" id="dlLookbackDays" min="10" step="1" value="120">
+                    </div>
+                    <div class="form-group">
+                        <label>Horizon Days</label>
+                        <input type="number" id="dlHorizonDays" min="7" step="1" value="365">
+                    </div>
+                </div>
+
+                <div style="display:flex; gap: 10px; margin-top: 16px; flex-wrap: wrap;">
+                    <button class="btn-secondary" onclick="runDLIngest()">Run Ingest</button>
+                    <button class="btn-success" onclick="runDLTrain()">Run Train</button>
+                    <button class="btn-primary" onclick="runDLIngestAndTrain()">Ingest + Train</button>
+                    <button class="btn-secondary" onclick="switchPage('forecast', event); loadLatestForecast();">View Latest Forecast</button>
+                </div>
+
+                <div id="dlJobStatus" class="loading" style="display:none; margin-top: 12px;"></div>
+            </div>
+        </div>
     `;
 }
 
@@ -298,7 +436,47 @@ async function fetchLiveRates() {
         // Update backtest pairs list
         btAvailablePairs = Object.keys(liveRates || {}).sort();
         renderBacktestPairOptions();
+
+        // Populate Trade/DL/Forecast asset dropdowns (best-effort)
+        try {
+            if (typeof initTradePage === 'function') initTradePage();
+            _populateDlAssetSelects();
+        } catch (_) {
+            // ignore
+        }
     }
+}
+
+function _populateDlAssetSelects() {
+    const pairs = Object.keys(liveRates || {}).sort();
+    const defaults = ['GOLD/USD', 'SILVER/USD', 'EUR/USD', 'GBP/USD', 'AUD/USD', 'NZD/USD', 'USD/CAD', 'USD/CHF', 'USD/JPY', 'NDX/USD'];
+    const options = (pairs && pairs.length) ? pairs : defaults;
+
+    function fill(selectId, currentValue) {
+        const el = document.getElementById(selectId);
+        if (!el) return;
+        const prev = currentValue || el.value;
+        el.innerHTML = '';
+        for (const p of options) {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.textContent = p;
+            el.appendChild(opt);
+        }
+        // Preserve user's current selection when possible.
+        if (prev && [...el.options].some(o => o.value === prev)) {
+            el.value = prev;
+            return;
+        }
+
+        const desired = String(window.selectedPair || 'GOLD/USD');
+        if ([...el.options].some(o => o.value === desired)) {
+            el.value = desired;
+        }
+    }
+
+    fill('dlAsset');
+    fill('dlForecastAsset');
 }
 
 function renderRates() {

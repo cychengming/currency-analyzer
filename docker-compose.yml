@@ -1,8 +1,22 @@
-version: '3.8'
-
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: currency-analyzer-postgres
+    environment:
+      - POSTGRES_USER=currency
+      - POSTGRES_PASSWORD=currency
+      - POSTGRES_DB=currency_analyzer
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
   currency-analyzer:
-    build: .
+    build:
+      context: .
+      args:
+        INSTALL_DL: ${INSTALL_DL:-1}
     container_name: currency-analyzer
     ports:
       - "5000:5000"
@@ -20,6 +34,10 @@ services:
       - GMAIL_PASSWORD=
       - HOST=0.0.0.0
       - PORT=5000
+      # Optional: used by DL/ETL modules (app still uses SQLite by default)
+      - POSTGRES_DSN=postgresql+psycopg2://currency:currency@postgres:5432/currency_analyzer
+    depends_on:
+      - postgres
     volumes:
       # Persist database
       - ./data:/app/data

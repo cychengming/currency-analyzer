@@ -1,14 +1,16 @@
 # Currency Analyzer - Multi-Condition Alert System Documentation
 
 **Version**: 2.0.0 (Multi-Condition Alerts)  
-**Last Updated**: January 17, 2026  
+**Last Updated**: February 7, 2026  
 **Status**: Production Ready
 
 ---
 
 ## 1. OVERVIEW
 
-The multi-condition alert system allows users to configure 6 different alert types per currency pair. Each alert type monitors a different market condition and can trigger independently. Users can set thresholds, parameters, and enable/disable each type individually.
+The alert system allows users to configure an alert preference per currency pair. A preference selects **one active alert condition** (from multiple supported condition types) and its parameters, plus an enable/disable toggle.
+
+Supported condition types currently include 7 options: percentage change, long-term uptrend (combined), historical high, historical low, price level, volatility, and moving-average crossover.
 
 ---
 
@@ -208,6 +210,29 @@ Trading Signal: Buy setup
 
 ---
 
+### 2.7 Type 7: Long-Term Upside Trend (Combined)
+
+**Description**: Higher-confidence long-term uptrend confirmation using multiple signals.
+
+**When to Use**: Long-horizon trend following, filtering noise, “buy-and-hold entry” style signals.
+
+**Parameters**:
+- `change_threshold` (0.1 - 100%, default: 5%)
+- `detection_period` (30 - 3650 days, default: 365 days)
+- `enable_trend_consistency` (boolean, default: true)
+- `short_ma_period` (7 - 200 days, default: 50)
+- `long_ma_period` (50 - 3650 days, default: 200)
+
+**How It Works** (high level):
+1. Computes % change over `detection_period`
+2. Optionally checks recent consistency
+3. Confirms bullish MA state (`short_ma` above `long_ma` and long MA rising)
+4. Confirms positive regression slope with minimum fit quality
+
+**Backend Function**: `detect_long_term_uptrend()` in `modules/currency.py`
+
+---
+
 ## 3. CONFIGURATION
 
 ### 3.1 Via Web Interface
@@ -222,7 +247,9 @@ Trading Signal: Buy setup
 5. Click "Save Alert Configuration"
 
 **Supported Pairs**:
-- EUR/USD, GBP/USD, USD/JPY, USD/CHF, AUD/USD, USD/CAD, NZD/USD
+- FX: EUR/USD, GBP/USD, USD/JPY, USD/CHF, AUD/USD, USD/CAD, NZD/USD
+- Commodities: GOLD/USD, SILVER/USD, COPPER/USD, WHEAT/USD, SOYBEAN/USD, CORN/USD
+- Indices: NDX/USD (NASDAQ-100)
 
 ### 3.2 Via API
 
@@ -362,6 +389,7 @@ START monitoring thread
   │  ├─ Get alert_type from preference
   │  ├─ SWITCH alert_type:
   │  │  ├─ 'percentage_change' → detect_trend()
+  │  │  ├─ 'long_term_uptrend' → detect_long_term_uptrend()
   │  │  ├─ 'historical_high' → detect_historical_high()
   │  │  ├─ 'historical_low' → detect_historical_low()
   │  │  ├─ 'price_level' → detect_price_level_cross()
@@ -381,7 +409,7 @@ START monitoring thread
 
 ### 6.1 Alert Email Format
 
-**Subject**: `Currency Alert: {pair} triggered {alert_type}`
+**Subject**: `[ALERT] Currency Alert: {pair} ({alert_type})`
 
 **Body**:
 ```
@@ -404,17 +432,29 @@ Next Alert: Not before 2026-01-17 15:30:00 (1-hour cooldown)
 
 ### 6.2 Email Setup
 
-**Requirements**: Gmail account with App Password
+The app supports **two** email configurations:
 
-**Setup Steps**:
-1. Enable 2FA on Gmail account
-2. Generate App Password from account settings
-3. Store as environment variable:
-   ```
-   GMAIL_USER=your.email@gmail.com
-   GMAIL_PASSWORD=xxxx xxxx xxxx xxxx
-   ```
-4. Test email: Click "Test Email" in Settings page
+1) **Preferred: generic SMTP provider** (recommended for production)
+
+Configure these environment variables (see `docker-compose.yml` for defaults/placeholders):
+```
+SMTP_HOST=mail.smtp2go.com
+SMTP_PORT=587
+SMTP_USER=your_username
+SMTP_PASS=your_password
+SMTP_FROM=alerts@yourdomain.com
+SMTP_USE_TLS=true
+SMTP_USE_SSL=false
+```
+
+2) **Fallback: Gmail SMTP** (optional)
+
+```
+GMAIL_USER=your.email@gmail.com
+GMAIL_PASSWORD=xxxx xxxx xxxx xxxx  # Gmail App Password
+```
+
+**Test email**: Click "Test Email" in Settings page (calls `POST /api/test-email`).
 
 ---
 
@@ -482,6 +522,8 @@ updateAlertTypeParameters(pair)
 
 saveAlertPreference(pair)
   // Collect parameters and send to backend
+
+**Note**: In the current codebase, most dashboard + Manage Alerts logic lives in `static/dashboard.js`. The files under `static/pages/` are placeholders for future per-page modularization.
 ```
 
 ---
@@ -558,8 +600,8 @@ saveAlertPreference(pair)
 ### Issue: Email not received
 
 **Checklist**:
-- Gmail user and app password configured?
-- App password (not regular password) used?
+- "Alert Email" set in Settings page?
+- SMTP provider configured (`SMTP_USER`/`SMTP_PASS`) OR Gmail fallback configured (`GMAIL_USER`/`GMAIL_PASSWORD`)?
 - Test email button works?
 - Check spam folder
 - Review server logs for SMTP errors
@@ -636,6 +678,7 @@ Authorization: Required (Session)
 Response (200):
 {
   "percentage_change": {...},
+  "long_term_uptrend": {...},
   "historical_high": {...},
   "historical_low": {...},
   "price_level": {...},

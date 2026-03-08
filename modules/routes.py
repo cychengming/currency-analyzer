@@ -2,6 +2,10 @@
 API Routes - All Flask endpoints
 """
 
+import threading
+import time
+import uuid
+
 from flask import Blueprint, jsonify, request, send_from_directory, session
 from urllib.parse import unquote
 from modules.auth import login_required, register_user, authenticate_user
@@ -13,9 +17,61 @@ from modules.database import (
 from modules.currency import fetch_live_rates, fetch_historical_data, fetch_historical_ohlc_data
 from modules.email_alert import send_email_alert
 from modules.backtest import run_backtest
+from modules.dl_api import get_latest_forecast, get_forecast_by_run_id, list_forecast_runs
 
 def create_routes(app, currency_pairs):
     """Create and register all API routes"""
+
+    # DL job runner (in-memory)
+    # Keeps the UI responsive while ingest/train run in background.
+    dl_jobs = {}
+    dl_jobs_lock = threading.Lock()
+
+    def _dl_job_create(job_type: str, params: dict) -> str:
+        job_id = uuid.uuid4().hex[:12]
+        now = time.time()
+        job = {
+            'id': job_id,
+            'type': job_type,
+            'status': 'running',
+            'message': 'starting',
+            'params': params or {},
+            'started_at': now,
+            'finished_at': None,
+            'result': None,
+        }
+        with dl_jobs_lock:
+            dl_jobs[job_id] = job
+            # Bound memory usage: keep last 50 jobs
+            if len(dl_jobs) > 50:
+                oldest = sorted(dl_jobs.values(), key=lambda j: j.get('started_at') or 0)[: max(0, len(dl_jobs) - 50)]
+                for j in oldest:
+                    dl_jobs.pop(j.get('id'), None)
+        return job_id
+
+    def _dl_job_update(job_id: str, **updates) -> None:
+        with dl_jobs_lock:
+            job = dl_jobs.get(job_id)
+            if not job:
+                return
+            job.update(updates)
+
+    def _dl_job_get(job_id: str):
+        with dl_jobs_lock:
+            job = dl_jobs.get(job_id)
+            return dict(job) if job else None
+
+    def _dl_run_in_thread(job_id: str, fn):
+        def runner():
+            try:
+                _dl_job_update(job_id, message='running')
+                result = fn()
+                _dl_job_update(job_id, status='completed', message='completed', finished_at=time.time(), result=result)
+            except BaseException as e:
+                _dl_job_update(job_id, status='failed', message=str(e), finished_at=time.time())
+
+        t = threading.Thread(target=runner, daemon=True)
+        t.start()
     
     @app.route('/')
     def index():
@@ -163,6 +219,169 @@ def create_routes(app, currency_pairs):
                 allow_multiple_trades=allow_multiple_trades,
             )
             return jsonify(result)
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    # ========== DL / FORECAST ROUTES (Optional) ==========
+
+    @app.route('/api/dl/runs', methods=['GET'])
+    @login_required
+    def api_dl_runs():
+        try:
+            try:
+                limit = int(request.args.get('limit', 25))
+            except (TypeError, ValueError):
+                limit = 25
+
+            runs, err = list_forecast_runs(limit=limit)
+            if err:
+                return jsonify({'success': False, 'error': err}), 400
+            return jsonify({'success': True, 'runs': runs})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/dl/forecast/latest', methods=['GET'])
+    @login_required
+    def api_dl_forecast_latest():
+        try:
+            asset = request.args.get('asset')
+            asset = str(asset).strip() if asset is not None else None
+            payload, err = get_latest_forecast(asset=asset)
+            if err:
+                return jsonify({'success': False, 'error': err}), 400
+            return jsonify({'success': True, **payload})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/dl/forecast/<int:run_id>', methods=['GET'])
+    @login_required
+    def api_dl_forecast_by_id(run_id):
+        try:
+            payload, err = get_forecast_by_run_id(int(run_id))
+            if err:
+                return jsonify({'success': False, 'error': err}), 404
+            return jsonify({'success': True, **payload})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/dl/job/<string:job_id>', methods=['GET'])
+    @login_required
+    def api_dl_job_status(job_id: str):
+        job = _dl_job_get(str(job_id))
+        if not job:
+            return jsonify({'success': False, 'error': 'job not found'}), 404
+        return jsonify({'success': True, 'job': job})
+
+    @app.route('/api/dl/ingest', methods=['POST'])
+    @login_required
+    def api_dl_ingest():
+        try:
+            payload = request.json or {}
+            years = payload.get('years', 30)
+            try:
+                years = int(years)
+            except (TypeError, ValueError):
+                years = 30
+            years = max(1, min(int(years), 60))
+
+            job_id = _dl_job_create('ingest', {'years': years})
+
+            def work():
+                from modules.dl_pipeline import ingest
+
+                ingest(years=years)
+                return f"ingested years={years}"
+
+            _dl_run_in_thread(job_id, work)
+            return jsonify({'success': True, 'job_id': job_id})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/dl/train', methods=['POST'])
+    @login_required
+    def api_dl_train():
+        try:
+            payload = request.json or {}
+            asset = payload.get('asset')
+            asset = str(asset).strip() if asset is not None else 'GOLD/USD'
+            model = str(payload.get('model', 'gru')).lower().strip()
+            if model not in ('gru', 'lstm'):
+                model = 'gru'
+
+            lookback_days = payload.get('lookback_days', 120)
+            horizon_days = payload.get('horizon_days', 365)
+            try:
+                lookback_days = int(lookback_days)
+            except (TypeError, ValueError):
+                lookback_days = 120
+            try:
+                horizon_days = int(horizon_days)
+            except (TypeError, ValueError):
+                horizon_days = 365
+
+            lookback_days = max(10, min(int(lookback_days), 730))
+            horizon_days = max(7, min(int(horizon_days), 730))
+
+            job_id = _dl_job_create('train', {'asset': asset, 'model': model, 'lookback_days': lookback_days, 'horizon_days': horizon_days})
+
+            def work():
+                from modules.dl_pipeline import train
+
+                run_id = train(model=model, lookback_days=lookback_days, horizon_days=horizon_days, asset=asset)
+                return f"run_id={run_id}"
+
+            _dl_run_in_thread(job_id, work)
+            return jsonify({'success': True, 'job_id': job_id})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/dl/ingest-train', methods=['POST'])
+    @login_required
+    def api_dl_ingest_train():
+        try:
+            payload = request.json or {}
+            years = payload.get('years', 30)
+            asset = payload.get('asset')
+            asset = str(asset).strip() if asset is not None else 'GOLD/USD'
+            model = str(payload.get('model', 'gru')).lower().strip()
+            lookback_days = payload.get('lookback_days', 120)
+            horizon_days = payload.get('horizon_days', 365)
+
+            try:
+                years = int(years)
+            except (TypeError, ValueError):
+                years = 30
+            years = max(1, min(int(years), 60))
+
+            if model not in ('gru', 'lstm'):
+                model = 'gru'
+
+            try:
+                lookback_days = int(lookback_days)
+            except (TypeError, ValueError):
+                lookback_days = 120
+            try:
+                horizon_days = int(horizon_days)
+            except (TypeError, ValueError):
+                horizon_days = 365
+
+            lookback_days = max(10, min(int(lookback_days), 730))
+            horizon_days = max(7, min(int(horizon_days), 730))
+
+            job_id = _dl_job_create(
+                'ingest-train',
+                {'years': years, 'asset': asset, 'model': model, 'lookback_days': lookback_days, 'horizon_days': horizon_days},
+            )
+
+            def work():
+                from modules.dl_pipeline import ingest, train
+
+                ingest(years=years)
+                run_id = train(model=model, lookback_days=lookback_days, horizon_days=horizon_days, asset=asset)
+                return f"run_id={run_id}"
+
+            _dl_run_in_thread(job_id, work)
+            return jsonify({'success': True, 'job_id': job_id})
         except Exception as e:
             return jsonify({'success': False, 'error': str(e)}), 500
 

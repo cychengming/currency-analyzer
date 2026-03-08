@@ -1,0 +1,12 @@
+# Extra dependencies for deep-learning + Postgres ETL/training
+# Keep this separate so the main web app image stays small.
+
+# DB read/write (forecast API)
+-r requirements-pg.txt
+
+# Training runtime (torch + numpy)
+-r requirements-dl-train.txt
+
+# Optional extras (not required by the current training script, but useful for experiments)
+pandas==2.2.3
+scikit-learn==1.5.2

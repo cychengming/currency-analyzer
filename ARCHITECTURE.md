@@ -12,9 +12,15 @@ currency-analyzer/
 │   ├── __init__.py          # Module package exports
 │   ├── database.py          # Database operations (SQLite CRUD)
 │   ├── auth.py              # Authentication & password handling
-│   ├── currency.py          # Exchange rate fetching & trend detection
-│   ├── email_alert.py       # Email notification sending
+│   ├── currency.py          # FX + commodity data fetching, OHLC, alert signal detection
+│   ├── email_alert.py       # Email notification sending (SMTP provider, Gmail fallback)
 │   ├── monitoring.py        # Background monitoring thread
+│   ├── backtest.py          # Backtesting engine (entry/exit rules)
+│   ├── dl_api.py            # Optional: forecast API helpers (Postgres)
+│   ├── dl_pipeline.py       # Optional: ingest/train/forecast pipeline (Postgres)
+│   ├── dl_postgres.py       # Optional: Postgres connection helpers
+│   ├── dl_schema.py         # Optional: SQLAlchemy schema for DL tables
+│   ├── dl_sources.py        # Optional: data sources (World Bank, Stooq, etc.)
 │   └── routes.py            # All Flask API endpoints
 ├── static/
 │   ├── login.html           # Authentication page
@@ -27,6 +33,7 @@ currency-analyzer/
 ├── Dockerfile               # Container configuration
 ├── docker-compose.yml       # Docker Compose setup
 ├── requirements.txt         # Python dependencies
+├── requirements-dl.txt      # Optional: DL + Postgres deps (installed by Dockerfile)
 └── data/                    # Database persistence volume
     └── currency_monitor.db
 ```
@@ -56,18 +63,25 @@ currency-analyzer/
 #### `modules/currency.py` (Business Logic)
 - **Purpose**: Currency data fetching and analysis
 - **Key Functions**:
-  - `fetch_live_rates()` - Get current exchange rates from Frankfurter API
-  - `fetch_historical_data()` - Get historical price data
+  - `fetch_live_rates()` - Get current FX + commodity rates
+  - `fetch_historical_data()` - Get historical daily closes
+  - `fetch_historical_ohlc_data()` - Get historical OHLC bars (used by backtesting)
   - `detect_trend()` - Analyze price trends with configurable thresholds
+  - Additional detectors for: historical highs/lows, price levels, volatility, MA crossovers, long-term uptrend
   - `parse_pair()` - Split currency pair strings
-- **Responsibility**: All currency analysis and external API calls
+- **Responsibility**: All market data + signal detection logic
+- **Notes**:
+  - FX pairs use frankfurter.app
+  - Commodities are fetched via Yahoo Finance when available; the code falls back to Stooq when Yahoo is blocked
 
 #### `modules/email_alert.py` (Notifications)
 - **Purpose**: Email alert notifications
 - **Key Functions**:
-  - `send_email_alert()` - Send HTML-formatted alerts via Gmail SMTP
+  - `send_email_alert()` - Send HTML-formatted alerts via SMTP provider (preferred) with Gmail fallback
 - **Responsibility**: Email delivery and formatting
-- **Config**: Reads from `GMAIL_USER` and `GMAIL_PASSWORD` environment variables
+- **Config**:
+  - Preferred SMTP provider: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_USE_TLS`, `SMTP_USE_SSL`
+  - Backward-compatible fallback: `GMAIL_USER`, `GMAIL_PASSWORD`
 
 #### `modules/monitoring.py` (Background Processing)
 - **Purpose**: Background monitoring thread management
@@ -82,10 +96,12 @@ currency-analyzer/
 - **Purpose**: All Flask API endpoints organized by concern
 - **Route Groups**:
   - **Authentication** (`/api/auth/*`) - Login, register, logout, status
-  - **Currency Data** (`/api/live-rates`, `/api/historical/*`) - Exchange rates
+  - **Currency Data** (`/api/live-rates`, `/api/historical/*`, `/api/historical-ohlc/*`) - Rates + history
   - **Settings** (`/api/settings`) - Global configuration
   - **Alerts** (`/api/alerts/*`) - History and preferences
   - **Monitoring** (`/api/monitoring/*`) - Control monitoring state
+  - **Backtesting** (`/api/backtest`) - Entry/exit evaluation on historical OHLC
+  - **Optional Forecasting** (`/api/dl/*`) - Read forecasts from Postgres
 - **Key Function**: `create_routes(app, currency_pairs)` - Register all routes
 - **Responsibility**: HTTP request handling, no business logic
 
@@ -147,19 +163,23 @@ SQLite (currency_monitor.db)
 ```
 Environment Variables (Docker)
     ↓
-modules/database.py (DATABASE path, data directory)
-modules/email_alert.py (GMAIL credentials)
+modules/email_alert.py (SMTP_* or Gmail fallback)
+modules/dl_postgres.py (optional POSTGRES_DSN for DL pipeline)
     ↓
 database.py (Default settings table)
     ↓
 API: /api/settings (User-configurable settings)
+
+**SQLite location**: the web app persists data under `/app/data/currency_monitor.db` (mapped from `./data/` in Docker Compose).
+
+**Note**: The Dockerfile sets an environment variable `DATABASE=/app/data/currency_monitor.db`, but the current `modules/database.py` uses a fixed path under `/app/data`.
 ```
 
 ### Deployment
 
 **Docker Build Process**:
 1. Python 3.11-slim base image
-2. Install dependencies from `requirements.txt`
+2. Install dependencies from `requirements.txt` (and `requirements-dl.txt` in the current Dockerfile)
 3. Copy `app.py`, `modules/`, `static/`
 4. Create `/app/data` directory for persistence
 5. Expose port 5000
@@ -226,7 +246,7 @@ def api_feature_data():
 
 ### Future Improvements
 
-- [ ] Add API documentation (Swagger/OpenAPI)
+- [ ] Add API documentation (Swagger/OpenAPI) (see `docs/API.md` for current reference)
 - [ ] Implement caching layer (Redis)
 - [ ] Add comprehensive unit tests
 - [ ] Migrate to async/await with asyncio
@@ -235,8 +255,5 @@ def api_feature_data():
 - [ ] Add rate limiting middleware
 - [ ] Create admin dashboard for system monitoring
 
-### Git History
-
-- Commit `fa9317b` - Refactor: Modularize app.py
 - Commit `9ae21e4` - Update: Include modules in Docker build
 - Previous: Multiple commits for features and bug fixes

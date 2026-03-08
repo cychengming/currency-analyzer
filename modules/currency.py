@@ -22,6 +22,7 @@ COMMODITY_SYMBOLS = {
     'WHEAT/USD': 'ZW=F',
     'SOYBEAN/USD': 'ZS=F',
     'CORN/USD': 'ZC=F',
+    'NDX/USD': '^NDX',
 }
 
 # Stooq symbols (free, no key). These are typically delayed end-of-day or delayed quotes.
@@ -32,6 +33,7 @@ COMMODITY_STOOQ_SYMBOLS = {
     'WHEAT/USD': 'zw.f',
     'SOYBEAN/USD': 'zs.f',
     'CORN/USD': 'zc.f',
+    'NDX/USD': '^ndx',
 }
 
 
@@ -123,7 +125,7 @@ def _fetch_yahoo_history(symbol: str, days: int):
         rng = '5y'
     elif days >= 700:  # ~24 months (UI uses months*30 => 24m = 720d)
         rng = '2y'
-    elif days >= 350:  # ~12 months (UI uses months*30 => 12m = 360d)
+    elif days >= 240:  # ~1 year of trading days needs ~1y calendar range
         rng = '1y'
     elif days >= 180:
         rng = '6mo'
@@ -176,7 +178,7 @@ def _fetch_yahoo_history_ohlc(symbol: str, days: int):
         rng = '5y'
     elif days >= 700:
         rng = '2y'
-    elif days >= 350:
+    elif days >= 240:
         rng = '1y'
     elif days >= 180:
         rng = '6mo'

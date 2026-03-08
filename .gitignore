@@ -31,3 +31,11 @@ ENV/
 # Ignore local SQLite databases
 data/*.db
 *.db
+
+# Ignore local Postgres volume
+pgdata/
+
+# Ignore trained model artifacts
+models/
+*.pt
+*.pth

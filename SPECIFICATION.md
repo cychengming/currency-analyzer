@@ -2,8 +2,8 @@
 
 **Project**: Currency Market Analyzer  
 **Version**: 2.0.0 (Modular Architecture)  
-**Last Updated**: January 17, 2026  
-**Status**: In Development
+**Last Updated**: February 7, 2026  
+**Status**: Active Development (core features working)
 
 ---
 
@@ -15,7 +15,11 @@ Currency Market Analyzer is a real-time currency exchange rate monitoring system
 - **Backend**: Python 3.11, Flask, SQLite
 - **Frontend**: Vanilla JavaScript, Chart.js, HTML5/CSS3
 - **Deployment**: Docker, Docker Compose
-- **External APIs**: Frankfurter API (exchange rates)
+- **External APIs**:
+  - frankfurter.app (FX rates)
+  - Yahoo Finance (commodities; may be blocked in some container networks)
+  - Stooq (fallback commodity quotes/history, no API key)
+  - World Bank API (optional DL pipeline GDP ingest)
 
 ---
 
@@ -29,11 +33,12 @@ Currency Market Analyzer is a real-time currency exchange rate monitoring system
 - ✅ Protected API endpoints with @login_required decorator
 
 ### 2.2 Live Exchange Rates
-- ✅ Real-time rates for 7 currency pairs:
-  - EUR/USD, GBP/USD, USD/JPY, USD/CHF, AUD/USD, USD/CAD, NZD/USD
+- ✅ Real-time rates for FX + commodities (default set in `app.py`):
+  - FX: EUR/USD, GBP/USD, USD/JPY, USD/CHF, AUD/USD, USD/CAD, NZD/USD
+  - Commodities: GOLD/USD, SILVER/USD, COPPER/USD, WHEAT/USD, SOYBEAN/USD, CORN/USD
 - ✅ Live rate cards with daily change percentage
 - ✅ Rate update interval: 1 minute (configurable)
-- ✅ Frankfurter API integration
+- ✅ FX via Frankfurter API; commodities via Yahoo Finance with Stooq fallback
 
 ### 2.3 Historical Data & Charts
 - ✅ Chart.js line chart visualization
@@ -43,13 +48,14 @@ Currency Market Analyzer is a real-time currency exchange rate monitoring system
   - **Months**: 1, 3, 6, 12, 24
 - ✅ Automatic day conversion (weeks × 7, months × 30)
 - ✅ URL encoding for pair names (EUR%2FUSD)
+- ✅ OHLC endpoint available for backtesting and candle-style consumers (`/api/historical-ohlc/<pair>/<days>`)
 
 ### 2.4 Alert System
 - ✅ Per-pair alert preferences (enable/disable)
-- ✅ Custom threshold per pair (% change)
-- ✅ Custom detection period per pair (days)
+- ✅ Alert type selection per pair (one active condition at a time)
+- ✅ Per-type parameters (threshold/period, lookback years, price levels, volatility mode, MA periods, etc.)
 - ✅ Alert history tracking with timestamps
-- ✅ Email alert notifications via Gmail SMTP
+- ✅ Email alert notifications via SMTP provider (preferred) with Gmail fallback
 - ✅ Global settings: threshold, period, check interval
 
 ### 2.5 Trend Detection
@@ -94,7 +100,7 @@ Currency Market Analyzer is a real-time currency exchange rate monitoring system
 |----|-------|--------|--------|
 | BUG-001 | Historical chart sometimes empty on initial load | High | Open |
 | BUG-002 | URL encoding causes 404 errors in some cases | Medium | Partially Fixed |
-| BUG-003 | Email alerts require Gmail app password setup | High | Documentation Needed |
+| BUG-003 | Email alerts require SMTP/Gmail credentials | High | Needs clearer docs |
 
 ### 3.2 Medium Priority Issues
 | ID | Issue | Impact | Status |
@@ -145,12 +151,11 @@ function updateChart(data) {
 - Add unit tests for special characters
 
 #### FIX-003: Email Alert Configuration
-**Problem**: Users struggle to configure Gmail credentials  
+**Problem**: Users struggle to configure email credentials (SMTP provider vs Gmail)  
 **Solution**:
-- Create setup wizard modal
-- Add validation endpoint
-- Document Gmail App Passwords process
-- Add test email button (already exists)
+- Document SMTP provider config (recommended)
+- Document Gmail App Passwords as fallback
+- Add “Test Email” guidance (already exists)
 
 ### 4.2 Medium Priority Fixes
 #### FIX-004: Add Comprehensive Logging
@@ -202,7 +207,7 @@ Backend:
 ### 5.2 Phase 2: Advanced Alerts (UPDATED - Multi-Condition System)
 | Feature | Priority | Effort | Status |
 |---------|----------|--------|--------|
-| Multi-condition alert types (6 types) | High | 12h | In Progress |
+| Multi-condition alert types (7 types incl. long_term_uptrend) | High | 12h | Implemented |
 | SMS notifications | Medium | 8h | Planned |
 | Slack webhook integration | Medium | 6h | Planned |
 | Custom alert names/descriptions | Low | 4h | Planned |
@@ -529,11 +534,15 @@ kubectl apply -f k8s/deployment.yaml
 ### Currency Data
 - `GET /api/live-rates` - Get current rates
 - `GET /api/historical/<pair>/<days>` - Get historical data
+- `GET /api/historical-ohlc/<pair>/<days>` - Get historical OHLC bars
+- `POST /api/backtest` - Run a simple entry/exit backtest
 
 ### Alerts
 - `GET /api/alerts` - Get alert history
 - `POST /api/alerts/preferences` - Update alert settings
 - `GET /api/alerts/preferences` - Get all preferences
+- `GET /api/alerts/preferences/<pair>` - Get a single pair preference
+- `GET /api/alerts/conditions` - Get available alert types + parameter schema
 - `DELETE /api/alerts/clear` - Clear alert history
 
 ### Settings
@@ -545,6 +554,11 @@ kubectl apply -f k8s/deployment.yaml
 - `POST /api/monitoring/stop` - Stop monitoring
 - `GET /api/monitoring/status` - Get status
 - `POST /api/test-email` - Send test email
+
+### Optional: Forecasting (DL)
+- `GET /api/dl/runs` - List forecast runs
+- `GET /api/dl/forecast/latest` - Get the latest forecast
+- `GET /api/dl/forecast/<run_id>` - Get forecast by run id
 
 ---
 
@@ -563,17 +577,27 @@ kubectl apply -f k8s/deployment.yaml
 
 ```bash
 # Application
-FLASK_ENV=production
 SECRET_KEY=<generate-with-secrets.token_hex(32)>
-DATABASE=/app/data/currency_monitor.db
-
-# Email
-GMAIL_USER=your.email@gmail.com
-GMAIL_PASSWORD=xxxx xxxx xxxx xxxx  # App password, not regular password
 
 # Server
 HOST=0.0.0.0
 PORT=5000
+
+# Email (preferred: SMTP provider)
+SMTP_HOST=mail.smtp2go.com
+SMTP_PORT=587
+SMTP_USER=your_smtp_username
+SMTP_PASS=your_smtp_password
+SMTP_FROM=alerts@yourdomain.com
+SMTP_USE_TLS=true
+SMTP_USE_SSL=false
+
+# Email (optional fallback)
+GMAIL_USER=your.email@gmail.com
+GMAIL_PASSWORD=xxxx xxxx xxxx xxxx  # Gmail App password
+
+# Optional: used by DL/ETL modules (Postgres)
+POSTGRES_DSN=postgresql+psycopg2://currency:currency@postgres:5432/currency_analyzer
 ```
 
 ---
@@ -604,6 +628,7 @@ PORT=5000
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.0.1 | 2026-02-07 | Docs refresh: commodities, SMTP, OHLC/backtest, optional DL endpoints |
 | 2.0.0 | 2026-01-17 | Modular architecture, 3D timeframe controls |
 | 1.0.0 | 2026-01-10 | Initial monolithic version |
 

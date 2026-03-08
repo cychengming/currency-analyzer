@@ -1,0 +1,4 @@
+# Training dependencies (kept separate from the core web app)
+
+numpy==2.1.3
+torch==2.5.1
